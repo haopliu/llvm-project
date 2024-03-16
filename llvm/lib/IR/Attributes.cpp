@@ -192,13 +192,17 @@ Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
 }
 
 Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
-                         SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+                         ArrayRef<ConstantRange> Ranges) {
   assert(Attribute::isConstRangeListAttrKind(Kind) &&
          "Not a const range list attribute");
   LLVMContextImpl *pImpl = Context.pImpl;
   FoldingSetNodeID ID;
   ID.AddInteger(Kind);
-  ID.AddRanges(Ranges);
+  ID.AddInteger(Ranges.size());
+  for (const ConstantRange &Range : Ranges) {
+    ID.AddInteger(Range.getLower());
+    ID.AddInteger(Range.getUpper());
+  }
 
   void *InsertPoint;
   AttributeImpl *PA = pImpl->AttrsSet.FindNodeOrInsertPos(ID, InsertPoint);
@@ -393,8 +397,7 @@ ConstantRange Attribute::getValueAsConstantRange() const {
   return pImpl->getValueAsConstantRange();
 }
 
-SmallVector<std::pair<int64_t, int64_t>, 16>
-Attribute::getValueAsRanges() const {
+ArrayRef<ConstantRange> Attribute::getValueAsRanges() const {
   if (!pImpl)
     return {};
   assert(isConstRangeListAttribute() &&
@@ -654,14 +657,11 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
 
   if (hasAttribute(Attribute::Initialized)) {
     auto Ranges = getValueAsRanges();
-    if (Ranges.empty())
-      return "";
 
     std::string Result = "initialized(";
     raw_string_ostream OS(Result);
     for (size_t i = 0; i < Ranges.size(); i++) {
-      auto [Start, End] = Ranges[i];
-      OS << "(" << Start << "," << End << ")";
+      OS << "(" << Ranges[i].getLower() << "," << Ranges[i].getUpper() << ")";
       if (i != Ranges.size() - 1)
         OS << ",";
     }
@@ -794,8 +794,7 @@ ConstantRange AttributeImpl::getValueAsConstantRange() const {
       ->getConstantRangeValue();
 }
 
-SmallVector<std::pair<int64_t, int64_t>, 16>
-AttributeImpl::getValueAsRanges() const {
+ArrayRef<ConstantRange> AttributeImpl::getValueAsRanges() const {
   assert(isConstRangeListAttribute());
   return static_cast<const ConstRangeListAttributeImpl *>(this)
       ->getRangesValue();
@@ -2008,9 +2007,9 @@ AttrBuilder &AttrBuilder::addConstantRangeAttr(Attribute::AttrKind Kind,
   return addAttribute(Attribute::get(Ctx, Kind, CR));
 }
 
-AttrBuilder &AttrBuilder::addConstRangeListAttr(
-    Attribute::AttrKind Kind,
-    SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+AttrBuilder &
+AttrBuilder::addConstRangeListAttr(Attribute::AttrKind Kind,
+                                   ArrayRef<ConstantRange> Ranges) {
   return addAttribute(Attribute::get(Ctx, Kind, Ranges));
 }
 

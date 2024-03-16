@@ -1567,8 +1567,8 @@ bool LLParser::parseEnumAttribute(Attribute::AttrKind Attr, AttrBuilder &B,
     return false;
   }
   case Attribute::Initialized: {
-    SmallVector<std::pair<int64_t, int64_t>, 16> Ranges;
-    if (parseInitializedRanges(lltok::kw_initialized, Ranges))
+    SmallVector<ConstantRange, 4> Ranges;
+    if (parseInitializedRanges(Ranges))
       return true;
     B.addConstRangeListAttr(Attribute::Initialized, Ranges);
     return false;
@@ -2381,19 +2381,22 @@ bool LLParser::parseOptionalDerefAttrBytes(lltok::Kind AttrKind,
   return false;
 }
 
-bool LLParser::parseConstRange(std::pair<int64_t, int64_t> &Range) {
+bool LLParser::parseConstRange(APInt &Lower, APInt &Upper) {
   LocTy LparenLoc = Lex.getLoc();
   if (!EatIfPresent(lltok::lparen))
     return error(LparenLoc, "expected'('");
 
-  if (parseInt64(Range.first))
-    return true;
+  auto ParseAPSInt = [&](APInt &Val) {
+    if (Lex.getKind() != lltok::APSInt)
+      return tokError("expected integer");
+    Val = Lex.getAPSIntVal().extend(64);
+    Lex.Lex();
+    return false;
+  };
 
-  if (EatIfPresent(lltok::comma)) {
-    if (parseInt64(Range.second)) {
-      return true;
-    }
-  }
+  if (ParseAPSInt(Lower) || parseToken(lltok::comma, "expected ','") ||
+      ParseAPSInt(Upper))
+    return true;
 
   LocTy RparenLoc = Lex.getLoc();
   if (!EatIfPresent(lltok::rparen))
@@ -2402,13 +2405,10 @@ bool LLParser::parseConstRange(std::pair<int64_t, int64_t> &Range) {
   return false;
 }
 
-bool LLParser::parseInitializedRanges(
-    lltok::Kind AttrKind,
-    SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
-  assert(AttrKind == lltok::kw_initialized);
+bool LLParser::parseInitializedRanges(SmallVectorImpl<ConstantRange> &Ranges) {
   Ranges.clear();
 
-  if (!EatIfPresent(AttrKind))
+  if (!EatIfPresent(lltok::kw_initialized))
     return false;
 
   LocTy LparenLoc = Lex.getLoc();
@@ -2417,10 +2417,10 @@ bool LLParser::parseInitializedRanges(
 
   // Parse each range.
   do {
-    std::pair<int64_t, int64_t> Range;
-    if (parseConstRange(Range))
+    APInt Lower, Upper;
+    if (parseConstRange(Lower, Upper))
       return true;
-    Ranges.push_back(Range);
+    Ranges.push_back(ConstantRange(Lower, Upper));
   } while (EatIfPresent(lltok::comma));
 
   LocTy RparenLoc = Lex.getLoc();

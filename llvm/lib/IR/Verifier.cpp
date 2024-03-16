@@ -2056,12 +2056,16 @@ void Verifier::verifyParameterAttrs(AttributeSet Attrs, Type *Ty,
     auto Inits = Attrs.getAttribute(Attribute::Initialized).getValueAsRanges();
     Check(!Inits.empty(), "Attribute 'initialized' does not support empty list",
           V);
+    Check(Inits[0].getLower().slt(Inits[0].getUpper()),
+          "Attribute 'initialized' 'Lo' should less than 'Hi'", V);
 
     for (size_t i = 1; i < Inits.size(); i++) {
-      Check(Inits[i].first > Inits[i - 1].first,
+      Check(Inits[i].getLower().slt(Inits[i].getUpper()),
+            "Attribute 'initialized' 'Lo' should less than 'Hi'", V);
+      Check(Inits[i].getLower().sgt(Inits[i - 1].getLower()),
             "Attribute 'initialized' requires intervals in ascending order!",
             V);
-      Check(Inits[i].first > Inits[i - 1].second,
+      Check(Inits[i].getLower().sgt(Inits[i - 1].getUpper()),
             "Attribute 'initialized' requires intervals merged!", V);
     }
   }

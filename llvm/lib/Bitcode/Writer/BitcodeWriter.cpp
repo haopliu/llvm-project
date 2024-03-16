@@ -933,7 +933,6 @@ void ModuleBitcodeWriter::writeAttributeGroupTable() {
         if (Ty)
           Record.push_back(VE.getTypeID(Attr.getValueAsType()));
       } else if (Attr.isConstantRangeAttribute()) {
-        assert(Attr.isConstantRangeAttribute());
         Record.push_back(7);
         Record.push_back(getAttrKindEncoding(Attr.getKindAsEnum()));
         emitConstantRange(Record, Attr.getValueAsConstantRange());
@@ -946,8 +945,8 @@ void ModuleBitcodeWriter::writeAttributeGroupTable() {
         Record.push_back(Ranges.size());
         if (!Ranges.empty()) {
           for (const auto &Range : Ranges) {
-            Record.push_back(Range.first);
-            Record.push_back(Range.second);
+            Record.push_back(Range.getLower().getSExtValue());
+            Record.push_back(Range.getUpper().getSExtValue());
           }
         }
       }

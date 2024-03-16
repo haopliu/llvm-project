@@ -94,8 +94,6 @@ public:
 
   static const unsigned NumIntAttrKinds = LastIntAttr - FirstIntAttr + 1;
   static const unsigned NumTypeAttrKinds = LastTypeAttr - FirstTypeAttr + 1;
-  static const unsigned NumConstRangeListAttrKinds =
-      LastConstRangeListAttr - FirstConstRangeListAttr + 1;
 
   static bool isEnumAttrKind(AttrKind Kind) {
     return Kind >= FirstEnumAttr && Kind <= LastEnumAttr;
@@ -137,7 +135,7 @@ public:
   static Attribute get(LLVMContext &Context, AttrKind Kind,
                        const ConstantRange &CR);
   static Attribute get(LLVMContext &Context, AttrKind Kind,
-                       SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges);
+                       ArrayRef<ConstantRange> Ranges);
 
   /// Return a uniquified Attribute object that has the specific
   /// alignment set.
@@ -238,7 +236,7 @@ public:
 
   /// Return the attribute's value as a const range list. This requires the
   /// attribute to be a const range list attribute.
-  SmallVector<std::pair<int64_t, int64_t>, 16> getValueAsRanges() const;
+  ArrayRef<ConstantRange> getValueAsRanges() const;
 
   /// Returns the alignment field of an attribute as a byte alignment
   /// value.
@@ -1184,9 +1182,8 @@ public:
   AttrBuilder &addTypeAttr(Attribute::AttrKind Kind, Type *Ty);
 
   /// Add a const range list attribute with the given ranges.
-  AttrBuilder &
-  addConstRangeListAttr(Attribute::AttrKind Kind,
-                        SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges);
+  AttrBuilder &addConstRangeListAttr(Attribute::AttrKind Kind,
+                                     ArrayRef<ConstantRange> Ranges);
 
   /// This turns a byval type into the form used internally in Attribute.
   AttrBuilder &addByValAttr(Type *Ty);

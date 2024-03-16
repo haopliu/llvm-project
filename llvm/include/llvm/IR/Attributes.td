@@ -115,6 +115,9 @@ def FnRetThunkExtern : EnumAttr<"fn_ret_thunk_extern", [FnAttr]>;
 /// Pass structure in an alloca.
 def InAlloca : TypeAttr<"inalloca", [ParamAttr]>;
 
+/// Pointer argument memory [%p+LoN, %p+HiN) is initialized.
+def Initialized : ConstRangeListAttr<"initialized", [ParamAttr]>;
+
 /// Source said inlining was desirable.
 def InlineHint : EnumAttr<"inlinehint", [FnAttr]>;
 
@@ -320,9 +323,6 @@ def Writable : EnumAttr<"writable", [ParamAttr]>;
 
 /// Function only writes to memory.
 def WriteOnly : EnumAttr<"writeonly", [ParamAttr]>;
-
-/// Pointer argument memory [%p+LoN, %p+HiN) is initialized.
-def Initialized : ConstRangeListAttr<"initialized", [ParamAttr]>;
 
 /// Zero extended before/after call.
 def ZExt : EnumAttr<"zeroext", [ParamAttr, RetAttr]>;

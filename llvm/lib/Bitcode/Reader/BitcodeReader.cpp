@@ -2322,12 +2322,14 @@ Error BitcodeReader::parseAttributeGroupBlock() {
           if (!Attribute::isConstRangeListAttrKind(Kind))
             return error("Not a const range list attribute");
 
-          SmallVector<std::pair<int64_t, int64_t>, 16> Ranges;
+          SmallVector<ConstantRange, 4> Ranges;
           int RangeSize = Record[++i];
           for (int Idx = 0; Idx < RangeSize; ++Idx) {
             int Start = Record[++i];
             int End = Record[++i];
-            Ranges.push_back(std::make_pair(Start, End));
+            Ranges.push_back(
+                ConstantRange(decodeSignRotatedValue(Record[++i]),
+                              decodeSignRotatedValue(Record[++i])));
           }
 
           B.addConstRangeListAttr(Kind, Ranges);
