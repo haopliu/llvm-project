@@ -856,13 +856,14 @@ getWriteIntervals(const SmallVector<Instruction *, 16> Writes, Argument *Arg,
 SmallVector<std::pair<int64_t, int64_t>, 16>
 getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
                  const SmallVector<Instruction *, 16> &Reads, Argument *Arg,
-                 DominatorTree &DT, PostDominatorTree &PDT,
-                 const TargetLibraryInfo &TLI, const DataLayout &DL) {
+		 FunctionAnalysisManager &FAM) {
   if (Writes.empty())
     return {};
+  Function *F = Arg->getParent();
 
   // Step1: Find Writes that post-dominates entry.
   SmallVector<Instruction *, 16> WritesPostDomEntry;
+  PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
   std::for_each(Writes.begin(), Writes.end(),
                 [&PDT, &WritesPostDomEntry](Instruction *Write) {
                   if (postDominatesEntry(PDT, Write)) {
@@ -874,6 +875,7 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
 
   // Step2: Check whether writes dominate reads.
   SmallVector<Instruction *, 16> Inits;
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   for (Instruction *Write : WritesPostDomEntry) {
     if (std::all_of(Reads.begin(), Reads.end(),
                     [&DT, &Write](Instruction *Read) {
@@ -885,6 +887,8 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   if (Inits.empty())
     return {};
 
+  const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
+  const DataLayout &DL = F->getParent()->getDataLayout();
   return getWriteIntervals(Inits, Arg, TLI, DL);
 }
 
@@ -919,8 +923,7 @@ static SmallVector<std::pair<int64_t, int64_t>, 16>
 determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
                           SmallVector<Instruction *, 16> &Writes,
                           SmallVector<Instruction *, 16> &SpecialUses,
-                          DominatorTree &DT, PostDominatorTree &PDT,
-                          const TargetLibraryInfo &TLI, const DataLayout &DL) {
+			  FunctionAnalysisManager &FAM) {
   // inalloca arguments are always clobbered by the call.
   // TODO: "initialized" attribute needs this???
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
@@ -929,7 +932,7 @@ determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
   SmallVector<Instruction *, 16> ReadsAndSpecialUses;
   ReadsAndSpecialUses.append(Reads.begin(), Reads.end());
   ReadsAndSpecialUses.append(SpecialUses.begin(), SpecialUses.end());
-  return getInitIntervals(Writes, ReadsAndSpecialUses, A, DT, PDT, TLI, DL);
+  return getInitIntervals(Writes, ReadsAndSpecialUses, A, FAM);
 }
 
 /// Deduce returned attributes for the SCC.
@@ -1095,10 +1098,6 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
       continue;
     }
 
-    DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
-    PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
-    const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
-    const DataLayout &DL = F->getParent()->getDataLayout();
     for (Argument &A : F->args()) {
       if (!A.getType()->isPointerTy())
         continue;
@@ -1143,7 +1142,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
             Changed.insert(F);
 
         auto Inits = determinePointerInitAttrs(&A, Reads, Writes, SpecialUses,
-                                               DT, PDT, TLI, DL);
+                                               FAM);
         if (!Inits.empty() && addInitAttr(&A, Inits))
           Changed.insert(F);
       }
@@ -1172,11 +1171,6 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
         Changed.insert(A->getParent());
 
         // Infer the access attributes given the new nocapture one
-        Function *F = A->getParent();
-        DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
-        PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
-        const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
-        const DataLayout &DL = F->getParent()->getDataLayout();
 
         SmallPtrSet<Argument *, 8> Self;
         Self.insert(&*A);
@@ -1189,7 +1183,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           addAccessAttr(A, R);
 
         auto Inits = determinePointerInitAttrs(A, Reads, Writes, SpecialUses,
-                                               DT, PDT, TLI, DL);
+                                               FAM);
         if (!Inits.empty())
           addInitAttr(A, Inits);
       }
@@ -1278,11 +1272,6 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
     SmallVector<std::pair<int64_t, int64_t>, 16> InitAttr;
     for (ArgumentGraphNode *N : ArgumentSCC) {
       Argument *A = N->Definition;
-      Function *F = A->getParent();
-      DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
-      PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
-      const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
-      const DataLayout &DL = F->getParent()->getDataLayout();
 
       SmallVector<Instruction *, 16> Reads, Writes, SpecialUses;
       getArgumentUses(A, ArgumentSCCNodes, &Reads, &Writes, &SpecialUses);
@@ -1291,7 +1280,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           determinePointerAccessAttrs(A, Reads, Writes, SpecialUses);
       AccessAttr = meetAccessAttr(AccessAttr, K);
       auto NewInitAttr = determinePointerInitAttrs(
-          A, Reads, Writes, SpecialUses, DT, PDT, TLI, DL);
+          A, Reads, Writes, SpecialUses, FAM);
       InitAttr = meetInitAttr(InitAttr, NewInitAttr);
 
       if (AccessAttr == Attribute::None && InitAttr.empty())
@@ -2157,6 +2146,9 @@ PreservedAnalyses PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C,
   PreservedAnalyses FuncPA;
   // We haven't changed the CFG for modified functions.
   FuncPA.preserveSet<CFGAnalyses>();
+  FuncPA.preserve<DominatorTreeAnalysis>();
+  FuncPA.preserve<PostDominatorTreeAnalysis>();
+  FuncPA.preserve<TargetLibraryAnalysis>();
   for (Function *Changed : ChangedFunctions) {
     FAM.invalidate(*Changed, FuncPA);
     // Also invalidate any direct callers of changed functions since analyses
