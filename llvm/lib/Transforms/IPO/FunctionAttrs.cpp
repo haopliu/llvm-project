@@ -736,39 +736,44 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
   }
 }
 
+SmallMapVector<std::pair<const BasicBlock *, const BasicBlock *>, bool, 8> DTCache;
+SmallMapVector<const BasicBlock *, bool, 4> PDTCache;
+
 bool dominateOrComesBefore(DominatorTree &DT, const Instruction *I1,
                            const Instruction *I2) {
+  auto DTIter = DTCache.find(std::make_pair(I1->getParent(), I2->getParent()));
+  if (DTIter != DTCache.end())
+    return DTIter->second;
+
+  bool Result = false;
   if (I1->getParent() == I2->getParent()) {
-    const BasicBlock *BB = I1->getParent();
-    int I1Idx = std::numeric_limits<int>::max();
-    int I2Idx = std::numeric_limits<int>::max();
-    int i = 0;
-    for (const Instruction &I : *BB) {
-      if (&I == I1) {
-        I1Idx = i;
-      } else if (&I == I2) {
-        I2Idx = i;
-      }
-      ++i;
+    if (I1->comesBefore(I2)) {
+      Result = true;
     }
-    if (I1Idx > I2Idx) {
-      return false;
-    }
-  } else if (!DT.properlyDominates(I1->getParent(), I2->getParent())) {
-    return false;
+  } else if (DT.properlyDominates(I1->getParent(), I2->getParent())) {
+      Result = true;
   }
-  return true;
+
+  DTCache.insert(std::make_pair(std::make_pair(I1->getParent(), I2->getParent()), Result));
+  return Result;
 }
 
 bool postDominatesEntry(PostDominatorTree &PDT, const Instruction *I) {
+  auto CacheIter = PDTCache.find(I->getParent());
+  if (CacheIter != PDTCache.end()) {
+    return CacheIter->second;
+  }
+
+  bool Result = false;
   const BasicBlock *EntryBB = &(I->getFunction()->getEntryBlock());
   if (I->getParent() == EntryBB) {
     // I is in the EntryBB; it must post-dom entry.
-    return true;
+    Result = true;
   } else if (PDT.properlyDominates(I->getParent(), EntryBB)) {
-    return true;
+    Result = true;
   }
-  return false;
+  PDTCache.insert(std::make_pair(I->getParent(), Result));
+  return Result;
 }
 
 /// Get the memory intervals that `W` writes to. If `W` is a CallInst, the
