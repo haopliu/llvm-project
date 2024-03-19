@@ -1997,10 +1997,6 @@ void Verifier::verifyParameterAttrs(AttributeSet Attrs, Type *Ty,
           Attrs.hasAttribute(Attribute::ReadNone)),
         "Attributes initialized and readnone are incompatible!", V);
 
-  Check(!(Attrs.hasAttribute(Attribute::Initialized) &&
-          Attrs.hasAttribute(Attribute::ReadOnly)),
-        "Attributes initialized and readonly are incompatible!", V);
-
   AttributeMask IncompatibleAttrs = AttributeFuncs::typeIncompatible(Ty);
   for (Attribute Attr : Attrs) {
     if (!Attr.isStringAttribute() &&
