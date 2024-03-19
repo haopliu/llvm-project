@@ -870,6 +870,10 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   // Step1: Find Writes that post-dominates entry.
   SmallVector<Instruction *, 16> WritesPostDomEntry;
   PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
+  // Does not make sense. Just to test that even only get Dom&PostDom result
+  // is expensive.
+  return {};
   std::for_each(Writes.begin(), Writes.end(),
                 [&PDT, &WritesPostDomEntry, &PDTCache](Instruction *Write) {
                   if (postDominatesEntry(PDT, Write, PDTCache)) {
@@ -881,7 +885,6 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
 
   // Step2: Check whether writes dominate reads.
   SmallVector<Instruction *, 16> Inits;
-  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   for (Instruction *Write : WritesPostDomEntry) {
     if (std::all_of(Reads.begin(), Reads.end(),
                     [&DT, &Write, &DTCache](Instruction *Read) {
