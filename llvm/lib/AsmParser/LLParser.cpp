@@ -25,6 +25,7 @@
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Comdat.h"
 #include "llvm/IR/ConstantRange.h"
+#include "llvm/IR/ConstantRangeList.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -1598,6 +1599,8 @@ bool LLParser::parseEnumAttribute(Attribute::AttrKind Attr, AttrBuilder &B,
   }
   case Attribute::Range:
     return parseRangeAttr(B);
+  case Attribute::Initialized:
+    return parseInitializedAttr(B);
   default:
     B.addAttribute(Attr);
     Lex.Lex();
@@ -3048,6 +3051,49 @@ bool LLParser::parseRangeAttr(AttrBuilder &B) {
     return true;
 
   B.addRangeAttr(ConstantRange(Lower, Upper));
+  return false;
+}
+
+/// parseInitializedAttr
+///   ::= initialized((Lo1,Hi1),(Lo2,Hi2),...)
+bool LLParser::parseInitializedAttr(AttrBuilder &B) {
+  Lex.Lex();
+
+  auto ParseAPSInt = [&](APInt &Val) {
+    if (Lex.getKind() != lltok::APSInt)
+      return tokError("expected integer");
+    Val = Lex.getAPSIntVal().extend(64);
+    Lex.Lex();
+    return false;
+  };
+
+  if (parseToken(lltok::lparen, "expected '('"))
+    return true;
+
+  ConstantRangeList CRL(64, false);
+  // Parse each constant range.
+  do {
+    APInt Lower, Upper;
+    if (parseToken(lltok::lparen, "expected'('"))
+      return true;
+
+    if (ParseAPSInt(Lower) ||
+      parseToken(lltok::comma, "expected ','") || ParseAPSInt(Upper))
+      return true;
+
+    if (Lower == Upper)
+      return tokError("the range should not represent the full or empty set!");
+
+    if (parseToken(lltok::rparen, "expected ')'"))
+      return true;
+
+    CRL.append(ConstantRange(Lower, Upper));
+  } while (EatIfPresent(lltok::comma));
+
+  if (parseToken(lltok::rparen, "expected ')'"))
+    return true;
+
+  B.addInitializedAttr(CRL);
   return false;
 }
 

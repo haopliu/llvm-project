@@ -25,6 +25,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/AttributeMask.h"
 #include "llvm/IR/ConstantRange.h"
+#include "llvm/IR/ConstantRangeList.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
@@ -191,6 +192,35 @@ Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
   return Attribute(PA);
 }
 
+Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
+                         const ConstantRangeList &CRL) {
+  assert(Attribute::isConstantRangeListAttrKind(Kind) &&
+         "Not a ConstantRangeList attribute");
+  LLVMContextImpl *pImpl = Context.pImpl;
+  FoldingSetNodeID ID;
+  ID.AddInteger(Kind);
+  ID.AddInteger(CRL.size());
+  for (auto &CR : CRL) {
+    ID.AddInteger(CR.getLower());
+    ID.AddInteger(CR.getUpper());
+  }
+
+  void *InsertPoint;
+  AttributeImpl *PA = pImpl->AttrsSet.FindNodeOrInsertPos(ID, InsertPoint);
+
+  if (!PA) {
+    // If we didn't find any existing attributes of the same shape then create a
+    // new one and insert it.
+    PA = new (pImpl->ConstantRangeListAttributeAlloc.Allocate())
+        ConstantRangeListAttributeImpl(Kind, CRL);
+    pImpl->AttrsSet.InsertNode(PA, InsertPoint);
+  }
+
+  // Return the Attribute that we found or created.
+  return Attribute(PA);
+}
+
+
 Attribute Attribute::getWithAlignment(LLVMContext &Context, Align A) {
   assert(A <= llvm::Value::MaximumAlignment && "Alignment too large.");
   return get(Context, Alignment, A.value());
@@ -317,10 +347,14 @@ bool Attribute::isConstantRangeAttribute() const {
   return pImpl && pImpl->isConstantRangeAttribute();
 }
 
+bool Attribute::isConstantRangeListAttribute() const {
+  return pImpl && pImpl->isConstantRangeListAttribute();
+}
+
 Attribute::AttrKind Attribute::getKindAsEnum() const {
   if (!pImpl) return None;
   assert((isEnumAttribute() || isIntAttribute() || isTypeAttribute() ||
-          isConstantRangeAttribute()) &&
+          isConstantRangeAttribute() || isConstantRangeListAttribute()) &&
          "Invalid attribute type to get the kind as an enum!");
   return pImpl->getKindAsEnum();
 }
@@ -364,6 +398,12 @@ ConstantRange Attribute::getValueAsConstantRange() const {
   assert(isConstantRangeAttribute() &&
          "Invalid attribute type to get the value as a ConstantRange!");
   return pImpl->getValueAsConstantRange();
+}
+
+ConstantRangeList Attribute::getValueAsConstantRangeList() const {
+  assert(isConstantRangeListAttribute() &&
+         "Invalid attribute type to get the value as a ConstantRangeList!");
+  return pImpl->getValueAsConstantRangeList();
 }
 
 bool Attribute::hasAttribute(AttrKind Kind) const {
@@ -448,6 +488,12 @@ ConstantRange Attribute::getRange() const {
   assert(hasAttribute(Attribute::Range) &&
          "Trying to get range args from non-range attribute");
   return pImpl->getValueAsConstantRange();
+}
+
+ConstantRangeList Attribute::getInitialized() const {
+  assert(hasAttribute(Attribute::Initialized) &&
+         "Trying to get initialized attr from non-ConstantRangeList attribute");
+  return pImpl->getValueAsConstantRangeList();
 }
 
 static const char *getModRefStr(ModRefInfo MR) {
@@ -616,6 +662,23 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return Result;
   }
 
+  if (hasAttribute(Attribute::Initialized)) {
+    std::string Result;
+    raw_string_ostream OS(Result);
+    ConstantRangeList CRL = getValueAsConstantRangeList();
+    OS << "initialized(";
+    size_t i = 0;
+    for (auto &CR : CRL) {
+      OS << "(" << CR.getLower() << "," << CR.getUpper() << ")";
+      if (i != CRL.size() - 1)
+        OS << ",";
+      i++;
+    }
+    OS << ")";
+    OS.flush();
+    return Result;
+  }
+
   // Convert target-dependent attributes to strings of the form:
   //
   //   "kind"
@@ -706,7 +769,7 @@ bool AttributeImpl::hasAttribute(StringRef Kind) const {
 
 Attribute::AttrKind AttributeImpl::getKindAsEnum() const {
   assert(isEnumAttribute() || isIntAttribute() || isTypeAttribute() ||
-         isConstantRangeAttribute());
+         isConstantRangeAttribute() || isConstantRangeListAttribute());
   return static_cast<const EnumAttributeImpl *>(this)->getEnumKind();
 }
 
@@ -741,6 +804,12 @@ ConstantRange AttributeImpl::getValueAsConstantRange() const {
       ->getConstantRangeValue();
 }
 
+ConstantRangeList AttributeImpl::getValueAsConstantRangeList() const {
+  assert(isConstantRangeListAttribute());
+  return static_cast<const ConstantRangeListAttributeImpl *>(this)
+      ->getConstantRangeListValue();
+}
+
 bool AttributeImpl::operator<(const AttributeImpl &AI) const {
   if (this == &AI)
     return false;
@@ -755,6 +824,7 @@ bool AttributeImpl::operator<(const AttributeImpl &AI) const {
     assert(!AI.isEnumAttribute() && "Non-unique attribute");
     assert(!AI.isTypeAttribute() && "Comparison of types would be unstable");
     assert(!AI.isConstantRangeAttribute() && "Unclear how to compare ranges");
+    assert(!AI.isConstantRangeListAttribute() && "Unclear how to compare range list");
     // TODO: Is this actually needed?
     assert(AI.isIntAttribute() && "Only possibility left");
     return getValueAsInt() < AI.getValueAsInt();
@@ -1950,6 +2020,15 @@ AttrBuilder &AttrBuilder::addConstantRangeAttr(Attribute::AttrKind Kind,
 
 AttrBuilder &AttrBuilder::addRangeAttr(const ConstantRange &CR) {
   return addConstantRangeAttr(Attribute::Range, CR);
+}
+
+AttrBuilder &AttrBuilder::addConstantRangeListAttr(Attribute::AttrKind Kind,
+                                               const ConstantRangeList &CRL) {
+  return addAttribute(Attribute::get(Ctx, Kind, CRL));
+}
+
+AttrBuilder &AttrBuilder::addInitializedAttr(const ConstantRangeList &CRL) {
+  return addConstantRangeListAttr(Attribute::Initialized, CRL);
 }
 
 AttrBuilder &AttrBuilder::merge(const AttrBuilder &B) {
