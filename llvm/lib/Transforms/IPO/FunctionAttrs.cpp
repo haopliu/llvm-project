@@ -782,18 +782,24 @@ ConstantRangeList getAccessIntervals(Instruction *Access, Argument *Arg,
   };
 
   if (auto *CB = dyn_cast<CallBase>(Access)) {
-    unsigned ArgIdx = Arg->getArgNo();
+    std::optional<unsigned int> ArgIdx = std::nullopt;
+    for (unsigned int i = 0; i < CB->arg_size(); i++) {
+      if (CB->getArgOperand(i) == Arg)
+        ArgIdx = i;
+    }
+    if (!ArgIdx.has_value())
+      return ConstantRangeList(64, false);
     // Propagate the "initialized" attr from callee to caller.
     auto Callee = CB->getCalledFunction();
-    if (Callee) {
-      Argument *CalleeArg = Callee->getArg(ArgIdx);
+    if (Callee && !Callee->isVarArg()) {
+      Argument *CalleeArg = Callee->getArg(ArgIdx.value());
       if (CalleeArg && CalleeArg->hasAttribute(Attribute::Initialized)) {
         return CalleeArg->getAttribute(Attribute::Initialized)
             .getValueAsConstantRangeList();
       }
     }
     return FinalizeInterval(
-        MemoryLocation::getForArgument(CB, ArgIdx, TLI));
+        MemoryLocation::getForArgument(CB, ArgIdx.value(), TLI));
   }
 
   int64_t WriteOff = 0;
@@ -802,7 +808,8 @@ ConstantRangeList getAccessIntervals(Instruction *Access, Argument *Arg,
     PointerOp = Store->getPointerOperand();
   if (auto *Load = dyn_cast<LoadInst>(Access))
     PointerOp = Load->getPointerOperand();
-  GetPointerBaseWithConstantOffset(PointerOp, WriteOff, DL);
+  if (PointerOp != nullptr)
+    GetPointerBaseWithConstantOffset(PointerOp, WriteOff, DL);
   return FinalizeInterval(MemoryLocation::getOrNone(Access), WriteOff);
 }
 
