@@ -22,7 +22,7 @@ class raw_ostream;
 
 /// This class represents a list of constant ranges.
 class ConstantRangeList {
-  SmallVector<ConstantRange, 4> Ranges;
+  SmallVector<ConstantRange, 2> Ranges;
 
   /// Create empty constant range with same bitwidth.
   ConstantRangeList getEmpty(uint32_t BitWidth) const {
