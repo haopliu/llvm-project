@@ -844,6 +844,16 @@ class BasicBlockInit {
     ArgumentAccesses.push_back(ArgumentAccess(Access, Arg, Type, TLI, DL));
   }
 
+  bool HasWrite() const {
+    for (auto &Access : ArgumentAccesses) {
+      if (Access.Type == ArgumentAccess::Write) {
+        if (!Access.Intervals.isEmptySet())
+          return true;
+      }
+    }
+    return false;
+  }
+
   void Compute() {
     // Sort accesses by their offset.
     std::sort(ArgumentAccesses.begin(), ArgumentAccesses.end(),
@@ -939,7 +949,14 @@ determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 8> &Reads,
     BBInits.find(Inst->getParent())->second.AddAccess(Inst, ArgumentAccess::Write);
   for (auto *Inst : SpecialUses)
     BBInits.find(Inst->getParent())->second.AddAccess(Inst, ArgumentAccess::SpecialUse);
-    
+
+  bool NoWrite = true;
+  for (auto &[_, BBInit] : BBInits) {
+    if (BBInit.HasWrite())
+      NoWrite = false;
+  }
+  if (NoWrite) return ConstantRangeList(64, false);
+
   for (auto &[_, BBInit] : BBInits)
     BBInit.Compute();
 
