@@ -63,6 +63,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <vector>
 
 using namespace llvm;
@@ -782,6 +783,7 @@ ConstantRangeList getAccessIntervals(Instruction *Access, Argument *Arg,
   };
 
   if (auto *CB = dyn_cast<CallBase>(Access)) {
+    //unsigned ArgIdx = Arg->getArgNo();
     std::optional<unsigned int> ArgIdx = std::nullopt;
     for (unsigned int i = 0; i < CB->arg_size(); i++) {
       if (CB->getArgOperand(i) == Arg)
@@ -789,6 +791,7 @@ ConstantRangeList getAccessIntervals(Instruction *Access, Argument *Arg,
     }
     if (!ArgIdx.has_value())
       return ConstantRangeList(64, false);
+
     // Propagate the "initialized" attr from callee to caller.
     auto Callee = CB->getCalledFunction();
     if (Callee && !Callee->isVarArg()) {
@@ -818,7 +821,7 @@ class ArgumentAccess {
   enum AccessType {Read, Write, SpecialUse};
   explicit ArgumentAccess(Instruction *Access, Argument *Arg, AccessType Type,
                           const TargetLibraryInfo &TLI, const DataLayout &DL) :
-    Access(Access), Type(Type), Intervals(64, false) {
+    Access(Access), Arg(Arg), Type(Type), Intervals(64, false) {
     Intervals = getAccessIntervals(Access, Arg, TLI, DL);
     // For Read and SpecialUse, conservatively assume the full memory is
     // accessed if we cannot get a precise interval.
@@ -829,29 +832,30 @@ class ArgumentAccess {
   }
 
   Instruction *Access;
+  Argument *Arg;
   AccessType Type;
   ConstantRangeList Intervals;
 };
 
+struct AccessIntervalStruct {
+  ConstantRangeList ReadIntervals;
+  ConstantRangeList WriteIntervals;
+  ConstantRangeList SpecialUseIntervals;
+};
+
 class BasicBlockInit {
  public:
-  explicit BasicBlockInit(BasicBlock *BB, Argument *Arg,
-                          const TargetLibraryInfo &TLI, const DataLayout &DL)
-      : BB(BB), Arg(Arg), TLI(TLI), DL(DL), ReadIntervals(64, false),
-        WriteIntervals(64, false), SpecialUseIntervals(64, false) {}
+  explicit BasicBlockInit(BasicBlock *BB, const TargetLibraryInfo &TLI,
+                          const DataLayout &DL)
+      : BB(BB), TLI(TLI), DL(DL) {}
+  using ArgumentIntervalsMap = SmallMapVector<Argument *, AccessIntervalStruct, 4>;
 
-  void AddAccess(Instruction *Access, ArgumentAccess::AccessType Type){
+  void AddAccess(Instruction *Access, Argument *Arg, ArgumentAccess::AccessType Type){
     ArgumentAccesses.push_back(ArgumentAccess(Access, Arg, Type, TLI, DL));
-  }
-
-  bool HasWrite() const {
-    for (auto &Access : ArgumentAccesses) {
-      if (Access.Type == ArgumentAccess::Write) {
-        if (!Access.Intervals.isEmptySet())
-          return true;
-      }
-    }
-    return false;
+    if (!AccessIntervals.contains(Arg))
+      AccessIntervals.insert({Arg, {ConstantRangeList(64, false),
+                                    ConstantRangeList(64, false),
+                                    ConstantRangeList(64, false)}});
   }
 
   void Compute() {
@@ -863,18 +867,22 @@ class BasicBlockInit {
 
     for (int i = ArgumentAccesses.size() - 1; i >= 0; i--) {
       auto &Access = ArgumentAccesses[i];
+      auto Iter = AccessIntervals.find(Access.Arg);
+      auto &SpecialUse = Iter->second.SpecialUseIntervals;
+      auto &Read = Iter->second.ReadIntervals;
+      auto &Write = Iter->second.WriteIntervals;
       if (Access.Type == ArgumentAccess::SpecialUse) {
-        SpecialUseIntervals= SpecialUseIntervals.unionWith(Access.Intervals);
-        ReadIntervals = ReadIntervals.subtractWith(Access.Intervals);
-        WriteIntervals = WriteIntervals.subtractWith(Access.Intervals);
+        SpecialUse = SpecialUse.unionWith(Access.Intervals);
+        Read = Read.subtractWith(Access.Intervals);
+        Write = Write.subtractWith(Access.Intervals);
       } else if (Access.Type == ArgumentAccess::Read) {
-        ReadIntervals = ReadIntervals.unionWith(Access.Intervals);
-        WriteIntervals = WriteIntervals.subtractWith(Access.Intervals);
-        SpecialUseIntervals = SpecialUseIntervals.subtractWith(Access.Intervals);
+        Read = Read.unionWith(Access.Intervals);
+        Write = Write.subtractWith(Access.Intervals);
+        SpecialUse = SpecialUse.subtractWith(Access.Intervals);
       } else {
-        WriteIntervals = WriteIntervals.unionWith(Access.Intervals);
-        ReadIntervals = ReadIntervals.subtractWith(Access.Intervals);
-        SpecialUseIntervals = SpecialUseIntervals.subtractWith(Access.Intervals);
+        Write = Write.unionWith(Access.Intervals);
+        Read = Read.subtractWith(Access.Intervals);
+        SpecialUse = SpecialUse.subtractWith(Access.Intervals);
       }
     }
   }
@@ -883,24 +891,68 @@ class BasicBlockInit {
     if (succ_empty(BB))
       return false;
 
-    ConstantRangeList SuccJoinReads(64, false);
-    ConstantRangeList SuccJoinWrites(64, false);
-    ConstantRangeList SuccJoinSpecialUses(64, false);
+    ArgumentIntervalsMap JointIntervals;
     for (auto iter = succ_begin(BB); iter != succ_end(BB); iter++) {
       // Union Read and SpecialUse, but intersect Write.
       auto &SuccBBInit = BBInits.find(*iter)->second;
-      SuccJoinReads = SuccJoinReads.unionWith(SuccBBInit.ReadIntervals);
-      SuccJoinSpecialUses = SuccJoinSpecialUses.unionWith(
-          SuccBBInit.SpecialUseIntervals);
+      for (auto &[Arg, Intervals] : SuccBBInit.AccessIntervals) {
+        auto Iter = JointIntervals.find(Arg);
+        if (Iter != JointIntervals.end()) {
+          Iter->second.ReadIntervals =
+              Iter->second.ReadIntervals.unionWith(Intervals.ReadIntervals);
+          Iter->second.SpecialUseIntervals =
+              Iter->second.SpecialUseIntervals.unionWith(Intervals.SpecialUseIntervals);
+          if (iter == succ_begin(BB))
+            Iter->second.WriteIntervals = Intervals.WriteIntervals;
+          else
+            Iter->second.WriteIntervals =
+              Iter->second.WriteIntervals.intersectWith(Intervals.WriteIntervals);
+        }
+        else {
+          JointIntervals.insert({Arg, Intervals});
+        }
+      }
 
+      /*MergePreArg(SuccJointIntervals, SuccBBInit.ReadIntervals, UnionFunc);
+      MergePreArg(SuccJoinSpecialUses, SuccBBInit.SpecialUseIntervals, UnionFunc);
+      MergePreArg(SuccJoinWrites, SuccBBInit.WriteIntervals, IntersectFunc);
       if (iter == succ_begin(BB))
         SuccJoinWrites = SuccBBInit.WriteIntervals;
       else
-        SuccJoinWrites = SuccJoinWrites.intersectWith(
-          SuccBBInit.WriteIntervals);
+        MergePreArg(SuccJoinWrites, SuccBBInit.WriteIntervals, IntersectFunc);*/
     }
 
-    ConstantRangeList NewSpecialUses = SpecialUseIntervals.unionWith(
+    // Vertically update per argument: AccessIntervals & JointIntervals.
+    bool Changed = false;
+    for (auto &[Arg, Intervals]: JointIntervals) {
+      auto Iter = AccessIntervals.find(Arg);
+      if (Iter != AccessIntervals.end()) {
+        auto &CurIntervals = Iter->second;
+        auto PreviousSpecial = CurIntervals.SpecialUseIntervals;
+        auto PreviousRead = CurIntervals.ReadIntervals;
+        auto PreviousWrite = CurIntervals.WriteIntervals;
+        CurIntervals.SpecialUseIntervals =
+            CurIntervals.SpecialUseIntervals.unionWith(
+            Intervals.SpecialUseIntervals.subtractWith(CurIntervals.ReadIntervals)
+            .subtractWith(CurIntervals.WriteIntervals));
+        CurIntervals.ReadIntervals = CurIntervals.ReadIntervals.unionWith(
+            Intervals.ReadIntervals.subtractWith(CurIntervals.SpecialUseIntervals)
+            .subtractWith(CurIntervals.WriteIntervals));
+        CurIntervals.WriteIntervals = CurIntervals.WriteIntervals.unionWith(
+            Intervals.WriteIntervals.subtractWith(CurIntervals.ReadIntervals)
+            .subtractWith(CurIntervals.SpecialUseIntervals));
+        if (!Changed && (PreviousSpecial != CurIntervals.SpecialUseIntervals ||
+            PreviousRead != CurIntervals.ReadIntervals ||
+            PreviousWrite != CurIntervals.WriteIntervals))
+          Changed = true;
+      } else {
+        AccessIntervals.insert({Arg, Intervals});
+        Changed = true;
+      }
+    }
+    return Changed;
+
+    /*ConstantRangeList NewSpecialUses = SpecialUseIntervals.unionWith(
             SuccJoinSpecialUses.subtractWith(ReadIntervals)
             .subtractWith(WriteIntervals));
     ConstantRangeList NewReads = ReadIntervals.unionWith(
@@ -915,47 +967,50 @@ class BasicBlockInit {
     SpecialUseIntervals = NewSpecialUses;
     ReadIntervals = NewReads;
     WriteIntervals = NewWrites;
-    return Updated;
+    return Updated;*/
   }
 
   BasicBlock *BB;
-  Argument *Arg;
   const TargetLibraryInfo &TLI;
   const DataLayout &DL;
 
   SmallVector<ArgumentAccess, 8> ArgumentAccesses;
-  ConstantRangeList ReadIntervals;
-  ConstantRangeList WriteIntervals;
-  ConstantRangeList SpecialUseIntervals;
+  ArgumentIntervalsMap AccessIntervals;
+  /*SmallMapVector<Argument *, ConstantRangeList, 4> ReadIntervals;
+  SmallMapVector<Argument *, ConstantRangeList, 4> WriteIntervals;
+  SmallMapVector<Argument *, ConstantRangeList, 4> SpecialUseIntervals;*/
 };
 
-ConstantRangeList
+/*ConstantRangeList
 determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 8> &Reads,
                           SmallVector<Instruction *, 8> &Writes,
-                          SmallVector<Instruction *, 8> &SpecialUses,
+                          SmallVector<Instruction *, 8> &SpecialUses,*/
+SmallMapVector<Argument *, ConstantRangeList, 4>
+determinePointerInitAttrs(SmallMapVector<Argument *, std::tuple<SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>>, 8> ArgsToAccesses,
+                          Function *F,
                           const TargetLibraryInfo &TLI, const DataLayout &DL) {
-  // inalloca arguments are always clobbered by the call.
-  if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
-    return ConstantRangeList(64, false);
-
-  Function *F = A->getParent();
   SmallMapVector<BasicBlock *, BasicBlockInit, 8> BBInits;
   for (BasicBlock &BB : *F)
-    BBInits.insert({&BB, BasicBlockInit(&BB, A, TLI, DL)});
+    BBInits.insert({&BB, BasicBlockInit(&BB, TLI, DL)});
 
-  for (auto *Inst : Reads)
-    BBInits.find(Inst->getParent())->second.AddAccess(Inst, ArgumentAccess::Read);
-  for (auto *Inst : Writes)
-    BBInits.find(Inst->getParent())->second.AddAccess(Inst, ArgumentAccess::Write);
-  for (auto *Inst : SpecialUses)
-    BBInits.find(Inst->getParent())->second.AddAccess(Inst, ArgumentAccess::SpecialUse);
+  for (const auto &[A, Accesses] : ArgsToAccesses) {
+    // inalloca arguments are always clobbered by the call.
+    if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
+      continue;
 
-  bool NoWrite = true;
-  for (auto &[_, BBInit] : BBInits) {
-    if (BBInit.HasWrite())
-      NoWrite = false;
+    auto &[Reads, Writes, SpecialUses] = Accesses;
+    if (Writes.empty())
+      continue;
+
+    for (auto *Inst : Reads)
+      BBInits.find(Inst->getParent())->second.AddAccess(Inst, A, ArgumentAccess::Read);
+    for (auto *Inst : Writes)
+      BBInits.find(Inst->getParent())->second.AddAccess(Inst, A, ArgumentAccess::Write);
+    for (auto *Inst : SpecialUses)
+      BBInits.find(Inst->getParent())->second.AddAccess(Inst, A, ArgumentAccess::SpecialUse);
   }
-  if (NoWrite) return ConstantRangeList(64, false);
 
   for (auto &[_, BBInit] : BBInits)
     BBInit.Compute();
@@ -984,7 +1039,13 @@ determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 8> &Reads,
     }
   }
 
-  return BBInits.find(&F->getEntryBlock())->second.WriteIntervals;
+  SmallMapVector<Argument *, ConstantRangeList, 4> ArgInits;
+  for (auto &[A, Intervals] : BBInits.find(&F->getEntryBlock())->second.AccessIntervals) {
+    if (Intervals.WriteIntervals.isEmptySet())
+      continue;
+    ArgInits.insert({A, Intervals.WriteIntervals});
+  }
+  return ArgInits;
 }
 
 /// Deduce returned attributes for the SCC.
@@ -1150,6 +1211,9 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
 
     const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
     const DataLayout &DL = F->getParent()->getDataLayout();
+    SmallMapVector<Argument *, std::tuple<SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>>, 8> ArgsToAccesses;
     for (Argument &A : F->args()) {
       if (!A.getType()->isPointerTy())
         continue;
@@ -1186,14 +1250,17 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
         Self.insert(&A);
         auto[Reads, Writes, SpecialUses] = getArgumentUses(&A, Self);
         Attribute::AttrKind R = determinePointerAccessAttrs(&A, Reads, Writes, SpecialUses);
-        auto InitAttr = determinePointerInitAttrs(&A, Reads, Writes, SpecialUses, TLI, DL);
+        ArgsToAccesses.insert({&A, std::make_tuple(Reads, Writes, SpecialUses)});
         if (R != Attribute::None)
           if (addAccessAttr(&A, R))
             Changed.insert(F);
-
-        if (!InitAttr.isEmptySet() && addInitAttr(&A, InitAttr)) {
-          Changed.insert(F);
-        }
+      }
+    }
+    // Add initialized attribute.
+    for (auto &[A, InitAttr] :
+             determinePointerInitAttrs(ArgsToAccesses, F, TLI, DL)) {
+      if (!InitAttr.isEmptySet() && addInitAttr(A, InitAttr)) {
+        Changed.insert(F);
       }
     }
   }
@@ -1226,11 +1293,16 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
         Attribute::AttrKind R = determinePointerAccessAttrs(&*A, Reads, Writes, SpecialUses);
         const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*A->getParent());
         const DataLayout &DL = A->getParent()->getParent()->getDataLayout();
-        auto InitAttr = determinePointerInitAttrs(&*A, Reads, Writes, SpecialUses, TLI, DL);
+        SmallMapVector<Argument *, std::tuple<SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>>, 8> ArgsToAccesses;
+        ArgsToAccesses.insert({A, std::make_tuple(Reads, Writes, SpecialUses)});
+        auto InitAttr = determinePointerInitAttrs(
+            ArgsToAccesses, A->getParent(), TLI, DL);
         if (R != Attribute::None)
           addAccessAttr(A, R);
-        if (!InitAttr.isEmptySet())
-          addInitAttr(A, InitAttr);
+        if (InitAttr.contains(A) && !InitAttr.find(A)->second.isEmptySet())
+          addInitAttr(A, InitAttr.find(A)->second);
       }
       continue;
     }
@@ -1302,7 +1374,15 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
       Attribute::AttrKind K = determinePointerAccessAttrs(A, Reads, Writes, SpecialUses);
       const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*A->getParent());
       const DataLayout &DL = A->getParent()->getParent()->getDataLayout();
-      auto NewInitAttr = determinePointerInitAttrs(A, Reads, Writes, SpecialUses, TLI, DL);
+
+      SmallMapVector<Argument *, std::tuple<SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>,
+                          SmallVector<Instruction *, 8>>, 8> ArgsToAccesses;
+        ArgsToAccesses.insert({A, std::make_tuple(Reads, Writes, SpecialUses)});
+      auto NewInitAttrs = determinePointerInitAttrs(ArgsToAccesses, A->getParent(),TLI, DL);
+      ConstantRangeList NewInitAttr(64, false);
+      if (NewInitAttrs.contains(A) && !NewInitAttrs.find(A)->second.isEmptySet())
+        NewInitAttr = NewInitAttrs.find(A)->second;
       AccessAttr = meetAccessAttr(AccessAttr, K);
       InitAttr = InitAttr.intersectWith(NewInitAttr);
       if (AccessAttr == Attribute::None && InitAttr.isEmptySet())
@@ -1316,7 +1396,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           Changed.insert(A->getParent());
       }
     }
-    
+
     if (!InitAttr.isEmptySet()) {
       for (ArgumentGraphNode *N : ArgumentSCC) {
         Argument *A = N->Definition;
