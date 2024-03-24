@@ -60,9 +60,13 @@ ConstantRangeList ConstantRangeList::intersectWith(const ConstantRangeList &CRL)
     auto &OtherRange = CRL.Ranges[j];
     assert(!Range.isSignWrappedSet() && !OtherRange.isSignWrappedSet() &&
           "Upper wrapped ranges are not supported");
-    auto IntersectRange = Range.intersectWith(OtherRange);
-    if (!IntersectRange.isEmptySet())
-      Result.append(IntersectRange);
+
+    APInt Start = Range.getLower().slt(OtherRange.getLower()) ?
+        OtherRange.getLower() : Range.getLower();
+    APInt End = Range.getUpper().slt(OtherRange.getUpper()) ?
+        Range.getUpper() : OtherRange.getUpper();
+    if (Start.slt(End))
+      Result.append(ConstantRange(Start, End));
 
     if (Range.getUpper().slt(OtherRange.getUpper()))
       i++;
