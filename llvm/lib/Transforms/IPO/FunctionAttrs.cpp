@@ -867,6 +867,8 @@ class BasicBlockInit {
 
     for (int i = ArgumentAccesses.size() - 1; i >= 0; i--) {
       auto &Access = ArgumentAccesses[i];
+      if (Access.Intervals.isEmptySet())
+        continue;
       auto Iter = AccessIntervals.find(Access.Arg);
       auto &SpecialUse = Iter->second.SpecialUseIntervals;
       auto &Read = Iter->second.ReadIntervals;
@@ -896,6 +898,10 @@ class BasicBlockInit {
       // Union Read and SpecialUse, but intersect Write.
       auto &SuccBBInit = BBInits.find(*iter)->second;
       for (auto &[Arg, Intervals] : SuccBBInit.AccessIntervals) {
+        if (Intervals.ReadIntervals.isEmptySet() &&
+            Intervals.WriteIntervals.isEmptySet() &&
+            Intervals.SpecialUseIntervals.isEmptySet())
+          continue;
         auto Iter = JointIntervals.find(Arg);
         if (Iter != JointIntervals.end()) {
           Iter->second.ReadIntervals =
@@ -925,6 +931,10 @@ class BasicBlockInit {
     // Vertically update per argument: AccessIntervals & JointIntervals.
     bool Changed = false;
     for (auto &[Arg, Intervals]: JointIntervals) {
+      if (Intervals.ReadIntervals.isEmptySet() &&
+          Intervals.WriteIntervals.isEmptySet() &&
+          Intervals.SpecialUseIntervals.isEmptySet())
+        continue;
       auto Iter = AccessIntervals.find(Arg);
       if (Iter != AccessIntervals.end()) {
         auto &CurIntervals = Iter->second;
