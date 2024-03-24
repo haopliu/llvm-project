@@ -1003,8 +1003,6 @@ determinePointerInitAttrs(SmallMapVector<Argument *, std::tuple<SmallVector<Inst
     auto &[Reads, Writes, SpecialUses] = Accesses;
     if (Writes.empty())
       continue;
-    if (Writes.size() * 2 <= (Reads.size() + SpecialUses.size()))
-      continue;
 
     for (auto *Inst : Reads)
       BBInits.find(Inst->getParent())->second.AddAccess(Inst, A, ArgumentAccess::Read);
