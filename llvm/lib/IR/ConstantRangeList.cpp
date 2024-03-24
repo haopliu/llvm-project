@@ -91,12 +91,11 @@ ConstantRangeList ConstantRangeList::unionWith(const ConstantRangeList &CRL) con
 
   auto UnionAndUpdateRange = [&PreviousRange, &Result](const ConstantRange &CR) {
     assert(!CR.isSignWrappedSet() && "Upper wrapped ranges are not supported");
-    auto CRUnion = PreviousRange.exactUnionWith(CR);
-    if (!CRUnion) {
+    if (PreviousRange.getUpper().slt(CR.getLower())) {
       Result.append(PreviousRange);
       PreviousRange = CR;
     } else {
-      PreviousRange = CRUnion.value();
+      PreviousRange = ConstantRange(PreviousRange.getLower(), CR.getUpper());
     }
   };
 
