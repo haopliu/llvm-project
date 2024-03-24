@@ -1017,24 +1017,31 @@ determinePointerInitAttrs(SmallMapVector<Argument *, std::tuple<SmallVector<Inst
 
   // Backward data flow analysis starts from real exit BBs (including multiple
   // exit blocks, infinite loops).
-  SmallVector<BasicBlock *, 16> Worklist;
+  SmallVector<std::pair<BasicBlock *, bool>, 16> Worklist;
   SmallPtrSet<BasicBlock *, 16> Visited;
   for (BasicBlock &BB : *F) {
     Instruction *Terminator = BB.getTerminator();
     if (isa<ReturnInst>(Terminator) || isa<UnreachableInst>(Terminator)) {
-      Worklist.push_back(&BB);
+      Worklist.push_back(std::make_pair(&BB, false));
       Visited.insert(&BB);
     }
   }
 
   while (!Worklist.empty()) {
-    BasicBlock *CurBB = Worklist.pop_back_val();
+    auto [CurBB, delay] = Worklist.pop_back_val();
+    if (delay)
+      continue;
 
     auto &BBInit = BBInits.find(CurBB)->second;
     bool Updated = BBInit.Update(BBInits);
     for (auto iter = pred_begin(CurBB); iter != pred_end(CurBB); iter++) {
       if (Visited.insert(*iter).second || Updated) {
-          Worklist.push_back(*iter);
+        for (int i = 0; i < Worklist.size(); i++) {
+          // delay the update.
+          if (Worklist[i].first == *iter)
+            Worklist[i].second = true;
+        }
+        Worklist.push_back(std::make_pair(*iter, false));
       }
     }
   }
