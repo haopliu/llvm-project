@@ -938,23 +938,27 @@ class BasicBlockInit {
       auto Iter = AccessIntervals.find(Arg);
       if (Iter != AccessIntervals.end()) {
         auto &CurIntervals = Iter->second;
-        auto PreviousSpecial = CurIntervals.SpecialUseIntervals;
-        auto PreviousRead = CurIntervals.ReadIntervals;
-        auto PreviousWrite = CurIntervals.WriteIntervals;
-        CurIntervals.SpecialUseIntervals =
-            CurIntervals.SpecialUseIntervals.unionWith(
+	auto NewSpecialUse = CurIntervals.SpecialUseIntervals.unionWith(
             Intervals.SpecialUseIntervals.subtractWith(CurIntervals.ReadIntervals)
             .subtractWith(CurIntervals.WriteIntervals));
-        CurIntervals.ReadIntervals = CurIntervals.ReadIntervals.unionWith(
+        auto NewRead = CurIntervals.ReadIntervals.unionWith(
             Intervals.ReadIntervals.subtractWith(CurIntervals.SpecialUseIntervals)
             .subtractWith(CurIntervals.WriteIntervals));
-        CurIntervals.WriteIntervals = CurIntervals.WriteIntervals.unionWith(
+        auto NewWrite = CurIntervals.WriteIntervals.unionWith(
             Intervals.WriteIntervals.subtractWith(CurIntervals.ReadIntervals)
             .subtractWith(CurIntervals.SpecialUseIntervals));
-        if (!Changed && (PreviousSpecial != CurIntervals.SpecialUseIntervals ||
-            PreviousRead != CurIntervals.ReadIntervals ||
-            PreviousWrite != CurIntervals.WriteIntervals))
+        if (NewSpecialUse != CurIntervals.SpecialUseIntervals) {
           Changed = true;
+          CurIntervals.SpecialUseIntervals = NewSpecialUse;
+        }
+        if (NewRead != CurIntervals.ReadIntervals) {
+          Changed = true;
+          CurIntervals.ReadIntervals = NewRead;
+        }
+        if (NewWrite != CurIntervals.WriteIntervals) {
+          Changed = true;
+          CurIntervals.WriteIntervals = NewWrite;
+        }
       } else {
         AccessIntervals.insert({Arg, Intervals});
         Changed = true;
