@@ -11,6 +11,7 @@
 #define LLVM_IR_CONSTANTRANGELIST_H
 
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/FoldingSet.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Support/Compiler.h"
@@ -23,6 +24,7 @@ class raw_ostream;
 /// This class represents a list of constant ranges.
 class ConstantRangeList {
   SmallVector<ConstantRange, 2> Ranges;
+  unsigned HashValue = 0;
 
   /// Create empty constant range with same bitwidth.
   ConstantRangeList getEmpty(uint32_t BitWidth) const {
@@ -39,6 +41,15 @@ public:
   explicit ConstantRangeList(uint32_t BitWidth, bool isFullSet);
 
   ConstantRangeList(int64_t Lower, int64_t Upper);
+  void computeHash() {
+    llvm::FoldingSetNodeID ID;
+    ID.AddInteger(Ranges.size());
+    for (const auto &R : Ranges) {
+      ID.AddInteger(R.getLower());
+      ID.AddInteger(R.getUpper());
+    }
+    HashValue = ID.ComputeHash();
+  }
 
   SmallVectorImpl<ConstantRange>::iterator begin() { return Ranges.begin(); }
   SmallVectorImpl<ConstantRange>::iterator end() { return Ranges.end(); }
@@ -99,11 +110,12 @@ public:
 
   /// Return true if this range is equal to another range.
   bool operator==(const ConstantRangeList &CRL) const {
-    if (size() != CRL.size()) return false;
+    /*if (size() != CRL.size()) return false;
     for (size_t i = 0; i < size(); ++i) {
       if (Ranges[i] != CRL.Ranges[i]) return false;
     }
-    return true;
+    return true;*/
+    return HashValue == CRL.HashValue;
   }
   bool operator!=(const ConstantRangeList &CRL) const {
     return !operator==(CRL);

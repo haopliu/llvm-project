@@ -22,6 +22,7 @@ ConstantRangeList::ConstantRangeList(uint32_t BitWidth, bool Full) {
 ConstantRangeList::ConstantRangeList(int64_t Lower, int64_t Upper) {
   Ranges.push_back(ConstantRange(APInt(64, StringRef(std::to_string(Lower)), 10),
                                  APInt(64, StringRef(std::to_string(Upper)), 10)));
+  computeHash();
 }
 
 ConstantRangeList ConstantRangeList::inverse() const {
@@ -41,6 +42,7 @@ ConstantRangeList ConstantRangeList::inverse() const {
       Result.append(ConstantRange(Start, APInt::getSignedMaxValue(getBitWidth())));
     }
   }
+  Result.computeHash();
   return Result;
 }
 
@@ -51,6 +53,7 @@ ConstantRangeList ConstantRangeList::intersectWith(const ConstantRangeList &CRL)
   // Handle common cases.
   if (isEmptySet() || CRL.isFullSet()) return *this;
   if (CRL.isEmptySet() || isFullSet()) return CRL;
+  if (HashValue == CRL.HashValue) return *this;
 
   // Intersect two range lists.
   ConstantRangeList Result(getBitWidth(), false);
@@ -73,6 +76,7 @@ ConstantRangeList ConstantRangeList::intersectWith(const ConstantRangeList &CRL)
     else
       j++;
   }
+  Result.computeHash();
   return Result;
 }
 
@@ -83,6 +87,7 @@ ConstantRangeList ConstantRangeList::unionWith(const ConstantRangeList &CRL) con
   // Handle common cases.
   if (isEmptySet() || CRL.isFullSet()) return CRL;
   if (CRL.isEmptySet() || isFullSet()) return *this;
+  if (HashValue == CRL.HashValue) return *this;
 
   ConstantRangeList Result(getBitWidth(), false);
   size_t i = 0, j =0;
@@ -114,6 +119,7 @@ ConstantRangeList ConstantRangeList::unionWith(const ConstantRangeList &CRL) con
     }
   }
   Result.append(PreviousRange);
+  Result.computeHash();
   return Result;
 }
 
