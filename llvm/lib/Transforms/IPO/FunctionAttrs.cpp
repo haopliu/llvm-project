@@ -870,7 +870,6 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   // Step1: Find Writes that post-dominates entry.
   SmallVector<Instruction *, 16> WritesPostDomEntry;
   PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
-  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   std::for_each(Writes.begin(), Writes.end(),
                 [&PDT, &WritesPostDomEntry, &PDTCache](Instruction *Write) {
                   if (postDominatesEntry(PDT, Write, PDTCache)) {
@@ -882,6 +881,7 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
 
   // Step2: Check whether writes dominate reads.
   SmallVector<Instruction *, 16> Inits;
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   for (Instruction *Write : WritesPostDomEntry) {
     if (std::all_of(Reads.begin(), Reads.end(),
                     [&DT, &Write, &DTCache](Instruction *Read) {
@@ -893,9 +893,6 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   if (Inits.empty())
     return {};
 
-  // Does not make sense. Just to test that const range list attr is not the
-  // regression culprit.
-  return {};
   const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
   const DataLayout &DL = F->getParent()->getDataLayout();
   return getWriteIntervals(Inits, Arg, TLI, DL);
