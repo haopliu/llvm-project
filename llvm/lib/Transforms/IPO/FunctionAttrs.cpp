@@ -852,34 +852,32 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   if (Writes.empty())
     return {};
 
-  // Step1: Find Writes that post-dominates entry.
-  SmallVector<Instruction *, 16> WritesPostDomEntry;
-  std::for_each(Writes.begin(), Writes.end(),
-                [&FAM, &WritesPostDomEntry](Instruction *Write) {
-                  if (postDominatesEntry(Write, FAM)) {
-                    WritesPostDomEntry.push_back(Write);
-                  }
-                });
-  if (WritesPostDomEntry.empty())
-    return {};
-
-  // Step2: Check whether writes dominate reads.
-  SmallVector<Instruction *, 16> Inits;
-  for (Instruction *Write : WritesPostDomEntry) {
+  SmallVector<Instruction *, 16> DomWrites;
+  for (Instruction *Write : Writes) {
     if (std::all_of(Reads.begin(), Reads.end(),
                     [&FAM, &Write](Instruction *Read) {
                       return dominateOrComesBefore(Write, Read, FAM);
                     })) {
-      Inits.push_back(Write);
+      DomWrites.push_back(Write);
     }
   }
-  if (Inits.empty())
+  if (DomWrites.empty())
+    return {};
+
+  SmallVector<Instruction *, 16> Initializations;
+  std::for_each(DomWrites.begin(), DomWrites.end(),
+                [&FAM, &Initializations](Instruction *Write) {
+                  if (postDominatesEntry(Write, FAM)) {
+                    Initializations.push_back(Write);
+                  }
+                });
+  if (Initializations.empty())
     return {};
 
   Function *F = Arg->getParent();
   const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
   const DataLayout &DL = F->getParent()->getDataLayout();
-  return getWriteIntervals(Inits, Arg, TLI, DL);
+  return getWriteIntervals(Initializations, Arg, TLI, DL);
 }
 
 /// Returns Attribute::None, Attribute::ReadOnly, Attribute::WriteOnly or
