@@ -736,44 +736,22 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
   }
 }
 
-using DTMap = SmallMapVector<std::pair<const BasicBlock *, const BasicBlock *>, bool, 8>;
-using PDTMap = SmallMapVector<const BasicBlock *, bool, 4>;
-
 bool dominateOrComesBefore(DominatorTree &DT, const Instruction *I1,
-                           const Instruction *I2, DTMap &DTCache) {
-  auto DTIter = DTCache.find(std::make_pair(I1->getParent(), I2->getParent()));
-  if (DTIter != DTCache.end())
-    return DTIter->second;
+                           const Instruction *I2) {
+  if (I1->getParent() == I2->getParent())
+    return I1->comesBefore(I2);
 
-  bool Result = true;
-  if (I1->getParent() == I2->getParent()) {
-    if (I2->comesBefore(I1)) {
-      Result = false;
-    }
-  } else if (!DT.properlyDominates(I1->getParent(), I2->getParent())) {
-      Result = false;
-  }
-
-  DTCache.insert(std::make_pair(std::make_pair(I1->getParent(), I2->getParent()), Result));
-  return Result;
+  return DT.properlyDominates(I1->getParent(), I2->getParent());
 }
 
-bool postDominatesEntry(PostDominatorTree &PDT, const Instruction *I, PDTMap &PDTCache) {
-  auto CacheIter = PDTCache.find(I->getParent());
-  if (CacheIter != PDTCache.end()) {
-    return CacheIter->second;
-  }
-
-  bool Result = false;
+bool postDominatesEntry(PostDominatorTree &PDT, const Instruction *I) {
   const BasicBlock *EntryBB = &(I->getFunction()->getEntryBlock());
   if (I->getParent() == EntryBB) {
     // I is in the EntryBB; it must post-dom entry.
-    Result = true;
-  } else if (PDT.properlyDominates(I->getParent(), EntryBB)) {
-    Result = true;
+    return true;
   }
-  PDTCache.insert(std::make_pair(I->getParent(), Result));
-  return Result;
+
+  return PDT.properlyDominates(I->getParent(), EntryBB);
 }
 
 /// Get the memory intervals that `W` writes to. If `W` is a CallInst, the
@@ -861,8 +839,7 @@ getWriteIntervals(const SmallVector<Instruction *, 16> Writes, Argument *Arg,
 SmallVector<std::pair<int64_t, int64_t>, 16>
 getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
                  const SmallVector<Instruction *, 16> &Reads, Argument *Arg,
-		 FunctionAnalysisManager &FAM,
-		 DTMap &DTCache, PDTMap &PDTCache) {
+		 FunctionAnalysisManager &FAM) {
   if (Writes.empty())
     return {};
   Function *F = Arg->getParent();
@@ -871,8 +848,8 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   SmallVector<Instruction *, 16> WritesPostDomEntry;
   PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
   std::for_each(Writes.begin(), Writes.end(),
-                [&PDT, &WritesPostDomEntry, &PDTCache](Instruction *Write) {
-                  if (postDominatesEntry(PDT, Write, PDTCache)) {
+                [&PDT, &WritesPostDomEntry](Instruction *Write) {
+                  if (postDominatesEntry(PDT, Write)) {
                     WritesPostDomEntry.push_back(Write);
                   }
                 });
@@ -884,8 +861,8 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   for (Instruction *Write : WritesPostDomEntry) {
     if (std::all_of(Reads.begin(), Reads.end(),
-                    [&DT, &Write, &DTCache](Instruction *Read) {
-                      return dominateOrComesBefore(DT, Write, Read, DTCache);
+                    [&DT, &Write](Instruction *Read) {
+                      return dominateOrComesBefore(DT, Write, Read);
                     })) {
       Inits.push_back(Write);
     }
@@ -929,8 +906,7 @@ static SmallVector<std::pair<int64_t, int64_t>, 16>
 determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
                           SmallVector<Instruction *, 16> &Writes,
                           SmallVector<Instruction *, 16> &SpecialUses,
-			  FunctionAnalysisManager &FAM,
-			  DTMap &DTCache, PDTMap &PDTCache) {
+			  FunctionAnalysisManager &FAM) {
   // inalloca arguments are always clobbered by the call.
   // TODO: "initialized" attribute needs this???
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
@@ -939,7 +915,7 @@ determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
   SmallVector<Instruction *, 16> ReadsAndSpecialUses;
   ReadsAndSpecialUses.append(Reads.begin(), Reads.end());
   ReadsAndSpecialUses.append(SpecialUses.begin(), SpecialUses.end());
-  return getInitIntervals(Writes, ReadsAndSpecialUses, A, FAM, DTCache, PDTCache);
+  return getInitIntervals(Writes, ReadsAndSpecialUses, A, FAM);
 }
 
 /// Deduce returned attributes for the SCC.
@@ -1079,9 +1055,6 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
                              FunctionAnalysisManager &FAM) {
   ArgumentGraph AG;
 
-  DTMap DTCache;
-  PDTMap PDTCache;
-
   // Check each function in turn, determining which pointer arguments are not
   // captured.
   for (Function *F : SCCNodes) {
@@ -1152,7 +1125,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
             Changed.insert(F);
 
         auto Inits = determinePointerInitAttrs(&A, Reads, Writes, SpecialUses,
-                                               FAM, DTCache, PDTCache);
+                                               FAM);
         if (!Inits.empty() && addInitAttr(&A, Inits))
           Changed.insert(F);
       }
@@ -1193,7 +1166,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           addAccessAttr(A, R);
 
         auto Inits = determinePointerInitAttrs(A, Reads, Writes, SpecialUses,
-                                               FAM, DTCache, PDTCache);
+                                               FAM);
         if (!Inits.empty())
           addInitAttr(A, Inits);
       }
@@ -1290,7 +1263,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           determinePointerAccessAttrs(A, Reads, Writes, SpecialUses);
       AccessAttr = meetAccessAttr(AccessAttr, K);
       auto NewInitAttr = determinePointerInitAttrs(
-          A, Reads, Writes, SpecialUses, FAM, DTCache, PDTCache);
+          A, Reads, Writes, SpecialUses, FAM);
       InitAttr = meetInitAttr(InitAttr, NewInitAttr);
 
       if (AccessAttr == Attribute::None && InitAttr.empty())
