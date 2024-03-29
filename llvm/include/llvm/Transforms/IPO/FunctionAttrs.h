@@ -47,8 +47,10 @@ bool thinLTOPropagateFunctionAttrs(
 /// attribute. It also discovers function arguments that are not captured by
 /// the function and marks them with the nocapture attribute.
 struct PostOrderFunctionAttrsPass : PassInfoMixin<PostOrderFunctionAttrsPass> {
-  PostOrderFunctionAttrsPass(bool SkipNonRecursive = false)
-      : SkipNonRecursive(SkipNonRecursive) {}
+  PostOrderFunctionAttrsPass(bool SkipNonRecursive = false,
+                             bool SkipInitializedAttr = false)
+      : SkipNonRecursive(SkipNonRecursive),
+        SkipInitializedAttr(SkipInitializedAttr) {}
   PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager &AM,
                         LazyCallGraph &CG, CGSCCUpdateResult &UR);
 
@@ -57,6 +59,7 @@ struct PostOrderFunctionAttrsPass : PassInfoMixin<PostOrderFunctionAttrsPass> {
 
 private:
   bool SkipNonRecursive;
+  bool SkipInitializedAttr;
 };
 
 /// A pass to do RPO deduction and propagation of function attributes.

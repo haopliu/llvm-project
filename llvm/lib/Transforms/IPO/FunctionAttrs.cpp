@@ -911,9 +911,11 @@ static SmallVector<std::pair<int64_t, int64_t>, 16>
 determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
                           SmallVector<Instruction *, 16> &Writes,
                           SmallVector<Instruction *, 16> &SpecialUses,
-			  FunctionAnalysisManager &FAM) {
+			  FunctionAnalysisManager &FAM,
+			  bool SkipInitializedAttr) {
+  if (SkipInitializedAttr)
+    return {};
   // inalloca arguments are always clobbered by the call.
-  // TODO: "initialized" attribute needs this???
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
     return {};
 
@@ -1057,7 +1059,8 @@ static bool addInitAttr(Argument *A,
 /// Deduce nocapture attributes for the SCC.
 static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
                              SmallSet<Function *, 8> &Changed,
-                             FunctionAnalysisManager &FAM) {
+                             FunctionAnalysisManager &FAM,
+			     bool SkipInitializedAttr) {
   ArgumentGraph AG;
 
   // Check each function in turn, determining which pointer arguments are not
@@ -1130,7 +1133,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
             Changed.insert(F);
 
         auto Inits = determinePointerInitAttrs(&A, Reads, Writes, SpecialUses,
-                                               FAM);
+                                               FAM, SkipInitializedAttr);
         if (!Inits.empty() && addInitAttr(&A, Inits))
           Changed.insert(F);
       }
@@ -1171,7 +1174,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           addAccessAttr(A, R);
 
         auto Inits = determinePointerInitAttrs(A, Reads, Writes, SpecialUses,
-                                               FAM);
+                                               FAM, SkipInitializedAttr);
         if (!Inits.empty())
           addInitAttr(A, Inits);
       }
@@ -1268,7 +1271,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           determinePointerAccessAttrs(A, Reads, Writes, SpecialUses);
       AccessAttr = meetAccessAttr(AccessAttr, K);
       auto NewInitAttr = determinePointerInitAttrs(
-          A, Reads, Writes, SpecialUses, FAM);
+          A, Reads, Writes, SpecialUses, FAM, SkipInitializedAttr);
       InitAttr = meetInitAttr(InitAttr, NewInitAttr);
 
       if (AccessAttr == Attribute::None && InitAttr.empty())
@@ -2054,7 +2057,8 @@ static SCCNodesResult createSCCNodeSet(ArrayRef<Function *> Functions) {
 template <typename AARGetterT>
 static SmallSet<Function *, 8>
 deriveAttrsInPostOrder(ArrayRef<Function *> Functions, AARGetterT &&AARGetter,
-                       FunctionAnalysisManager &FAM, bool ArgAttrsOnly) {
+                       FunctionAnalysisManager &FAM, bool ArgAttrsOnly,
+		       bool SkipInitializedAttr) {
   SCCNodesResult Nodes = createSCCNodeSet(Functions);
 
   // Bail if the SCC only contains optnone functions.
@@ -2063,13 +2067,13 @@ deriveAttrsInPostOrder(ArrayRef<Function *> Functions, AARGetterT &&AARGetter,
 
   SmallSet<Function *, 8> Changed;
   if (ArgAttrsOnly) {
-    addArgumentAttrs(Nodes.SCCNodes, Changed, FAM);
+    addArgumentAttrs(Nodes.SCCNodes, Changed, FAM, SkipInitializedAttr);
     return Changed;
   }
 
   addArgumentReturnedAttrs(Nodes.SCCNodes, Changed);
   addMemoryAttrs(Nodes.SCCNodes, AARGetter, Changed);
-  addArgumentAttrs(Nodes.SCCNodes, Changed, FAM);
+  addArgumentAttrs(Nodes.SCCNodes, Changed, FAM, SkipInitializedAttr);
   inferConvergent(Nodes.SCCNodes, Changed);
   addNoReturnAttrs(Nodes.SCCNodes, Changed);
   addWillReturn(Nodes.SCCNodes, Changed);
@@ -2125,7 +2129,7 @@ PreservedAnalyses PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C,
   }
 
   auto ChangedFunctions =
-      deriveAttrsInPostOrder(Functions, AARGetter, FAM, ArgAttrsOnly);
+      deriveAttrsInPostOrder(Functions, AARGetter, FAM, ArgAttrsOnly, SkipInitializedAttr);
   if (ChangedFunctions.empty())
     return PreservedAnalyses::all();
 
