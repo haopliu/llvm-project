@@ -736,21 +736,30 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
   }
 }
 
-bool dominateOrComesBefore(DominatorTree &DT, const Instruction *I1,
-                           const Instruction *I2) {
+bool dominateOrComesBefore(Instruction *I1, Instruction *I2,
+                           FunctionAnalysisManager &FAM) {
+  Function *F = I1->getFunction();
+  BasicBlock *EntryBlock = &F->getEntryBlock();
   if (I1->getParent() == I2->getParent())
     return I1->comesBefore(I2);
+  else if (I1->getParent() == EntryBlock)
+    return true;
+  else if (I2->getParent() == EntryBlock)
+    return false;
 
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   return DT.properlyDominates(I1->getParent(), I2->getParent());
 }
 
-bool postDominatesEntry(PostDominatorTree &PDT, const Instruction *I) {
+bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
   const BasicBlock *EntryBB = &(I->getFunction()->getEntryBlock());
   if (I->getParent() == EntryBB) {
     // I is in the EntryBB; it must post-dom entry.
     return true;
   }
 
+  Function *F = I->getFunction();
+  PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
   return PDT.properlyDominates(I->getParent(), EntryBB);
 }
 
@@ -842,14 +851,12 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
 		 FunctionAnalysisManager &FAM) {
   if (Writes.empty())
     return {};
-  Function *F = Arg->getParent();
 
   // Step1: Find Writes that post-dominates entry.
   SmallVector<Instruction *, 16> WritesPostDomEntry;
-  PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
   std::for_each(Writes.begin(), Writes.end(),
-                [&PDT, &WritesPostDomEntry](Instruction *Write) {
-                  if (postDominatesEntry(PDT, Write)) {
+                [&FAM, &WritesPostDomEntry](Instruction *Write) {
+                  if (postDominatesEntry(Write, FAM)) {
                     WritesPostDomEntry.push_back(Write);
                   }
                 });
@@ -858,11 +865,10 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
 
   // Step2: Check whether writes dominate reads.
   SmallVector<Instruction *, 16> Inits;
-  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   for (Instruction *Write : WritesPostDomEntry) {
     if (std::all_of(Reads.begin(), Reads.end(),
-                    [&DT, &Write](Instruction *Read) {
-                      return dominateOrComesBefore(DT, Write, Read);
+                    [&FAM, &Write](Instruction *Read) {
+                      return dominateOrComesBefore(Write, Read, FAM);
                     })) {
       Inits.push_back(Write);
     }
@@ -870,6 +876,7 @@ getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
   if (Inits.empty())
     return {};
 
+  Function *F = Arg->getParent();
   const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
   const DataLayout &DL = F->getParent()->getDataLayout();
   return getWriteIntervals(Inits, Arg, TLI, DL);
