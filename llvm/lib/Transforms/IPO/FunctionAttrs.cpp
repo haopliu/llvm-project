@@ -747,9 +747,6 @@ bool dominateOrComesBefore(Instruction *I1, Instruction *I2,
   else if (I2->getParent() == EntryBlock)
     return false;
 
-  if (F->getName() == "sqlite3VdbeExec")
-    return false;
-
   DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
   return DT.properlyDominates(I1->getParent(), I2->getParent());
 }
@@ -762,8 +759,6 @@ bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
   }
 
   Function *F = I->getFunction();
-  if (F->getName() == "sqlite3VdbeExec")
-    return false;
   PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
   return PDT.properlyDominates(I->getParent(), EntryBB);
 }
