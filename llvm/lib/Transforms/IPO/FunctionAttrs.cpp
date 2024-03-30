@@ -747,9 +747,8 @@ bool dominateOrComesBefore(Instruction *I1, Instruction *I2,
   else if (I2->getParent() == EntryBlock)
     return false;
 
-  return false;
-  /*DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
-  return DT.properlyDominates(I1->getParent(), I2->getParent());*/
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
+  return DT.properlyDominates(I1->getParent(), I2->getParent());
 }
 
 bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
@@ -759,10 +758,9 @@ bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
     return true;
   }
 
-  return false;
-  /*Function *F = I->getFunction();
+  Function *F = I->getFunction();
   PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
-  return PDT.properlyDominates(I->getParent(), EntryBB);*/
+  return PDT.properlyDominates(I->getParent(), EntryBB);
 }
 
 /// Get the memory intervals that `W` writes to. If `W` is a CallInst, the
