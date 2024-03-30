@@ -758,9 +758,10 @@ bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
     return true;
   }
 
-  Function *F = I->getFunction();
+  return false;
+  /*Function *F = I->getFunction();
   PostDominatorTree &PDT = FAM.getResult<PostDominatorTreeAnalysis>(*F);
-  return PDT.properlyDominates(I->getParent(), EntryBB);
+  return PDT.properlyDominates(I->getParent(), EntryBB);*/
 }
 
 /// Get the memory intervals that `W` writes to. If `W` is a CallInst, the
