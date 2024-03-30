@@ -747,8 +747,9 @@ bool dominateOrComesBefore(Instruction *I1, Instruction *I2,
   else if (I2->getParent() == EntryBlock)
     return false;
 
-  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
-  return DT.properlyDominates(I1->getParent(), I2->getParent());
+  return false;
+  /*DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(*F);
+  return DT.properlyDominates(I1->getParent(), I2->getParent());*/
 }
 
 bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
