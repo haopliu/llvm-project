@@ -625,13 +625,17 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
     switch (I->getOpcode()) {
     case Instruction::BitCast:
     case Instruction::GetElementPtr:
-    case Instruction::PHI:
-    case Instruction::Select:
     case Instruction::AddrSpaceCast:
       // The original value is not read/written via this if the new value isn't.
       for (Use &UU : I->uses())
         if (Visited.insert(&UU).second)
           Worklist.push_back(&UU);
+      break;
+
+    // Expensive to track down and just treat as special uses.
+    case Instruction::PHI:
+    case Instruction::Select:
+      SpecialUses->push_back(I);
       break;
 
     case Instruction::Call:
