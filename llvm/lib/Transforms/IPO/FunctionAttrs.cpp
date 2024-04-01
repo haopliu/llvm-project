@@ -646,13 +646,13 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
 
       // Given we've explictily handled the callee operand above, what's left
       // must be a data operand (e.g. argument or operand bundle)
-      const unsigned UseIndex = CB.getDataOperandNo(U);
+      /*const unsigned UseIndex = CB.getDataOperandNo(U);
 
       // Some intrinsics (for instance ptrmask) do not capture their results,
       // but return results thas alias their pointer argument, and thus should
       // be handled like GEP or addrspacecast above.
       if (isIntrinsicReturningPointerAliasingArgumentWithoutCapturing(
-              &CB, /*MustPreserveNullness=*/false)) {
+              &CB, false)) {
         for (Use &UU : CB.uses())
           if (Visited.insert(&UU).second)
             Worklist.push_back(&UU);
@@ -669,7 +669,7 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
           for (Use &UU : I->uses())
             if (Visited.insert(&UU).second)
               Worklist.push_back(&UU);
-      }
+      }*/
 
       /*ModRefInfo ArgMR = CB.getMemoryEffects().getModRef(IRMemLocation::ArgMem);
       if (isNoModRef(ArgMR))
