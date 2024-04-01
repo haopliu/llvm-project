@@ -611,8 +611,8 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
                      SmallVector<Instruction *, 16> *Reads,
                      SmallVector<Instruction *, 16> *Writes,
                      SmallVector<Instruction *, 16> *SpecialUses) {
-  SmallVector<Use *, 32> Worklist;
-  SmallPtrSet<Use *, 32> Visited;
+  SmallVector<Use *, 256> Worklist;
+  DenseSet<Use *> Visited;
   for (Use &U : A->uses()) {
     Visited.insert(&U);
     Worklist.push_back(&U);
