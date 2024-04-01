@@ -2138,9 +2138,6 @@ PreservedAnalyses PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C,
   PreservedAnalyses FuncPA;
   // We haven't changed the CFG for modified functions.
   FuncPA.preserveSet<CFGAnalyses>();
-  FuncPA.preserve<DominatorTreeAnalysis>();
-  FuncPA.preserve<PostDominatorTreeAnalysis>();
-  FuncPA.preserve<TargetLibraryAnalysis>();
   for (Function *Changed : ChangedFunctions) {
     FAM.invalidate(*Changed, FuncPA);
     // Also invalidate any direct callers of changed functions since analyses
