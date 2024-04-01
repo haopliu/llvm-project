@@ -608,8 +608,8 @@ struct GraphTraits<ArgumentGraph *> : public GraphTraits<ArgumentGraphNode *> {
 } // end namespace llvm
 
 void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
-                     SmallVector<Instruction *, 16> *Reads,
-                     SmallVector<Instruction *, 16> *Writes,
+                     SmallVector<Instruction *, 128> *Reads,
+                     SmallVector<Instruction *, 128> *Writes,
                      SmallVector<Instruction *, 16> *SpecialUses) {
   SmallVector<Use *, 256> Worklist;
   DenseSet<Use *> Visited;
@@ -817,7 +817,7 @@ getWriteIntervals(Instruction *W, Argument *Arg, const TargetLibraryInfo &TLI,
 /// Get the memory intervals that `Writes` write to, then merge intervals and
 /// return in ascending order.
 SmallVector<std::pair<int64_t, int64_t>, 16>
-getWriteIntervals(const SmallVector<Instruction *, 16> &Writes, Argument *Arg,
+getWriteIntervals(const SmallVectorImpl<Instruction *> &Writes, Argument *Arg,
                   const TargetLibraryInfo &TLI, const DataLayout &DL) {
   // Write intervals: end --> start.
   std::map<int64_t, int64_t> IntervalMapping;
@@ -852,8 +852,8 @@ getWriteIntervals(const SmallVector<Instruction *, 16> &Writes, Argument *Arg,
 /// Get initialization intervals. Initializations are writes that dominates
 /// reads and post-dominates entry.
 SmallVector<std::pair<int64_t, int64_t>, 16>
-getInitIntervals(const SmallVector<Instruction *, 16> &Writes,
-                 const SmallVector<Instruction *, 16> &Reads, Argument *Arg,
+getInitIntervals(const SmallVectorImpl<Instruction *> &Writes,
+                 const SmallVectorImpl<Instruction *> &Reads, Argument *Arg,
 		 FunctionAnalysisManager &FAM) {
   if (Writes.empty())
     return {};
@@ -1032,9 +1032,9 @@ determinePointerAccessAttrs(Argument *A,
 
 /// Compute the argument initialized attribute.
 static SmallVector<std::pair<int64_t, int64_t>, 16>
-determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
-                          SmallVector<Instruction *, 16> &Writes,
-                          SmallVector<Instruction *, 16> &SpecialUses,
+determinePointerInitAttrs(Argument *A, SmallVectorImpl<Instruction *> &Reads,
+                          SmallVectorImpl<Instruction *> &Writes,
+                          SmallVectorImpl<Instruction *> &SpecialUses,
 			  FunctionAnalysisManager &FAM,
 			  bool SkipInitializedAttr) {
   if (SkipInitializedAttr)
@@ -1043,7 +1043,7 @@ determinePointerInitAttrs(Argument *A, SmallVector<Instruction *, 16> &Reads,
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
     return {};
 
-  SmallVector<Instruction *, 16> ReadsAndSpecialUses;
+  SmallVector<Instruction *, 128> ReadsAndSpecialUses;
   ReadsAndSpecialUses.append(Reads.begin(), Reads.end());
   ReadsAndSpecialUses.append(SpecialUses.begin(), SpecialUses.end());
   return getInitIntervals(Writes, ReadsAndSpecialUses, A, FAM);
@@ -1247,7 +1247,8 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
         // functions in the SCC.
         SmallPtrSet<Argument *, 8> Self;
         Self.insert(&A);
-        SmallVector<Instruction *, 16> Reads, Writes, SpecialUses;
+        SmallVector<Instruction *, 128> Reads, Writes;
+        SmallVector<Instruction *, 16> SpecialUses;
         getArgumentUses(&A, Self, &Reads, &Writes, &SpecialUses);
 
         Attribute::AttrKind R =
@@ -1289,7 +1290,8 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
 
         SmallPtrSet<Argument *, 8> Self;
         Self.insert(&*A);
-        SmallVector<Instruction *, 16> Reads, Writes, SpecialUses;
+        SmallVector<Instruction *, 128> Reads, Writes;
+        SmallVector<Instruction *, 16> SpecialUses;
         getArgumentUses(A, Self, &Reads, &Writes, &SpecialUses);
 
         Attribute::AttrKind R =
@@ -1388,7 +1390,8 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
     for (ArgumentGraphNode *N : ArgumentSCC) {
       Argument *A = N->Definition;
 
-      SmallVector<Instruction *, 16> Reads, Writes, SpecialUses;
+      SmallVector<Instruction *, 128> Reads, Writes;
+      SmallVector<Instruction *, 16> SpecialUses;
       getArgumentUses(A, ArgumentSCCNodes, &Reads, &Writes, &SpecialUses);
 
       Attribute::AttrKind K =
