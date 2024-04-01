@@ -813,7 +813,7 @@ getWriteIntervals(Instruction *W, Argument *Arg, const TargetLibraryInfo &TLI,
 /// Get the memory intervals that `Writes` write to, then merge intervals and
 /// return in ascending order.
 SmallVector<std::pair<int64_t, int64_t>, 16>
-getWriteIntervals(const SmallVector<Instruction *, 16> Writes, Argument *Arg,
+getWriteIntervals(const SmallVector<Instruction *, 16> &Writes, Argument *Arg,
                   const TargetLibraryInfo &TLI, const DataLayout &DL) {
   // Write intervals: end --> start.
   std::map<int64_t, int64_t> IntervalMapping;
