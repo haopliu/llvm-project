@@ -1033,21 +1033,19 @@ determinePointerAccessAttrs(Argument *A,
 
 /// Compute the argument initialized attribute.
 static SmallVector<std::pair<int64_t, int64_t>, 16>
-determinePointerInitAttrs(Argument *A, SmallVectorImpl<Instruction *> &Reads,
-                          SmallVectorImpl<Instruction *> &Writes,
-                          SmallVectorImpl<Instruction *> &SpecialUses,
-			  FunctionAnalysisManager &FAM,
-			  bool SkipInitializedAttr) {
+determinePointerInitAttrs(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
+			  FunctionAnalysisManager &FAM, bool SkipInitializedAttr) {
   if (SkipInitializedAttr)
     return {};
   // inalloca arguments are always clobbered by the call.
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
     return {};
 
-  SmallVector<Instruction *, 128> ReadsAndSpecialUses;
-  ReadsAndSpecialUses.append(Reads.begin(), Reads.end());
-  ReadsAndSpecialUses.append(SpecialUses.begin(), SpecialUses.end());
-  return getInitIntervals(Writes, ReadsAndSpecialUses, A, FAM);
+  SmallVector<Instruction *, 128> Reads, Writes;
+  SmallVector<Instruction *, 16> SpecialUses;
+  getArgumentUses(A, SCCNodes, &Reads, &Writes, &SpecialUses);
+  Reads.append(SpecialUses.begin(), SpecialUses.end());
+  return getInitIntervals(Writes, Reads, A, FAM);
 }
 
 /// Deduce returned attributes for the SCC.
@@ -1248,9 +1246,6 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
         // functions in the SCC.
         SmallPtrSet<Argument *, 8> Self;
         Self.insert(&A);
-        SmallVector<Instruction *, 128> Reads, Writes;
-        SmallVector<Instruction *, 16> SpecialUses;
-        getArgumentUses(&A, Self, &Reads, &Writes, &SpecialUses);
 
         Attribute::AttrKind R =
             determinePointerAccessAttrs(&A, Self);
@@ -1258,7 +1253,7 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
           if (addAccessAttr(&A, R))
             Changed.insert(F);
 
-        auto Inits = determinePointerInitAttrs(&A, Reads, Writes, SpecialUses,
+        auto Inits = determinePointerInitAttrs(&A, Self,
                                                FAM, SkipInitializedAttr);
         if (!Inits.empty() && addInitAttr(&A, Inits))
           Changed.insert(F);
@@ -1291,16 +1286,13 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
 
         SmallPtrSet<Argument *, 8> Self;
         Self.insert(&*A);
-        SmallVector<Instruction *, 128> Reads, Writes;
-        SmallVector<Instruction *, 16> SpecialUses;
-        getArgumentUses(A, Self, &Reads, &Writes, &SpecialUses);
 
         Attribute::AttrKind R =
             determinePointerAccessAttrs(&*A, Self);
         if (R != Attribute::None)
           addAccessAttr(A, R);
 
-        auto Inits = determinePointerInitAttrs(A, Reads, Writes, SpecialUses,
+        auto Inits = determinePointerInitAttrs(A, Self,
                                                FAM, SkipInitializedAttr);
         if (!Inits.empty())
           addInitAttr(A, Inits);
@@ -1391,15 +1383,11 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
     for (ArgumentGraphNode *N : ArgumentSCC) {
       Argument *A = N->Definition;
 
-      SmallVector<Instruction *, 128> Reads, Writes;
-      SmallVector<Instruction *, 16> SpecialUses;
-      getArgumentUses(A, ArgumentSCCNodes, &Reads, &Writes, &SpecialUses);
-
       Attribute::AttrKind K =
           determinePointerAccessAttrs(A, ArgumentSCCNodes);
       AccessAttr = meetAccessAttr(AccessAttr, K);
       auto NewInitAttr = determinePointerInitAttrs(
-          A, Reads, Writes, SpecialUses, FAM, SkipInitializedAttr);
+          A, ArgumentSCCNodes, FAM, SkipInitializedAttr);
       InitAttr = meetInitAttr(InitAttr, NewInitAttr);
 
       if (AccessAttr == Attribute::None && InitAttr.empty())
