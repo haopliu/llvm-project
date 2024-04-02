@@ -611,6 +611,7 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
                      SmallVector<Instruction *, 128> *Reads,
                      SmallVector<Instruction *, 128> *Writes,
                      SmallVector<Instruction *, 16> *SpecialUses) {
+  if (A->getNumUses() >= 100) return;
   SmallVector<Use *, 256> Worklist;
   DenseSet<Use *> Visited;
   for (Use &U : A->uses()) {
