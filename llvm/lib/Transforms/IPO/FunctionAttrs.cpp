@@ -613,7 +613,7 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
                      SmallVectorImpl<Instruction *> *SpecialUses) {
   if (A->getNumUses() >= 100) return;
   SmallVector<Use *, 32> Worklist;
-  DenseSet<Use *> Visited;
+  SmallPtrSet<Use *, 32> Visited;
   for (Use &U : A->uses()) {
     Visited.insert(&U);
     Worklist.push_back(&U);
