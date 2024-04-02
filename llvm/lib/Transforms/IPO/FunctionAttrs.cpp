@@ -608,11 +608,11 @@ struct GraphTraits<ArgumentGraph *> : public GraphTraits<ArgumentGraphNode *> {
 } // end namespace llvm
 
 void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
-                     SmallVector<Instruction *, 128> *Reads,
-                     SmallVector<Instruction *, 128> *Writes,
-                     SmallVector<Instruction *, 16> *SpecialUses) {
+                     SmallVectorImpl<Instruction *> *Reads,
+                     SmallVectorImpl<Instruction *> *Writes,
+                     SmallVectorImpl<Instruction *> *SpecialUses) {
   if (A->getNumUses() >= 100) return;
-  SmallVector<Use *, 256> Worklist;
+  SmallVector<Use *, 32> Worklist;
   DenseSet<Use *> Visited;
   for (Use &U : A->uses()) {
     Visited.insert(&U);
@@ -1041,7 +1041,7 @@ determinePointerInitAttrs(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNode
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
     return {};
 
-  SmallVector<Instruction *, 128> Reads, Writes;
+  SmallVector<Instruction *, 32> Reads, Writes;
   SmallVector<Instruction *, 16> SpecialUses;
   getArgumentUses(A, SCCNodes, &Reads, &Writes, &SpecialUses);
   Reads.append(SpecialUses.begin(), SpecialUses.end());
