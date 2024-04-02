@@ -1041,6 +1041,9 @@ determinePointerInitAttrs(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNode
   if (A->hasInAllocaAttr() || A->hasPreallocatedAttr())
     return {};
 
+  if (A->hasByValAttr())
+    return {};
+
   SmallVector<Instruction *, 32> Reads, Writes;
   SmallVector<Instruction *, 16> SpecialUses;
   getArgumentUses(A, SCCNodes, &Reads, &Writes, &SpecialUses);
