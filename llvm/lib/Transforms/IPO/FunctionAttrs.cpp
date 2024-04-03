@@ -612,9 +612,7 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
                      SmallVectorImpl<Instruction *> *Writes,
                      SmallVectorImpl<Instruction *> *SpecialUses) {
   SmallVector<Use *, 32> Worklist;
-  SmallPtrSet<Use *, 32> Visited;
   for (Use &U : A->uses()) {
-    Visited.insert(&U);
     Worklist.push_back(&U);
   }
 
@@ -628,8 +626,7 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
     case Instruction::AddrSpaceCast:
       // The original value is not read/written via this if the new value isn't.
       for (Use &UU : I->uses())
-        if (Visited.insert(&UU).second)
-          Worklist.push_back(&UU);
+        Worklist.push_back(&UU);
       break;
 
     // Expensive to track down and just treat as special uses.
