@@ -137,7 +137,7 @@ public:
   static Attribute get(LLVMContext &Context, AttrKind Kind,
                        const ConstantRange &CR);
   static Attribute get(LLVMContext &Context, AttrKind Kind,
-                       SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges);
+                       SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges);
 
   /// Return a uniquified Attribute object that has the specific
   /// alignment set.
@@ -238,7 +238,7 @@ public:
 
   /// Return the attribute's value as a const range list. This requires the
   /// attribute to be a const range list attribute.
-  SmallVector<std::pair<int64_t, int64_t>, 16> getValueAsRanges() const;
+  SmallVector<std::pair<int64_t, int64_t>, 2> getValueAsRanges() const;
 
   /// Returns the alignment field of an attribute as a byte alignment
   /// value.
@@ -1186,7 +1186,7 @@ public:
   /// Add a const range list attribute with the given ranges.
   AttrBuilder &
   addConstRangeListAttr(Attribute::AttrKind Kind,
-                        SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges);
+                        SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges);
 
   /// This turns a byval type into the form used internally in Attribute.
   AttrBuilder &addByValAttr(Type *Ty);

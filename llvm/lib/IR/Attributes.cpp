@@ -192,7 +192,7 @@ Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
 }
 
 Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
-                         SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+                         SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges) {
   assert(Attribute::isConstRangeListAttrKind(Kind) &&
          "Not a const range list attribute");
   LLVMContextImpl *pImpl = Context.pImpl;
@@ -394,7 +394,7 @@ ConstantRange Attribute::getValueAsConstantRange() const {
   return pImpl->getValueAsConstantRange();
 }
 
-SmallVector<std::pair<int64_t, int64_t>, 16>
+SmallVector<std::pair<int64_t, int64_t>, 2>
 Attribute::getValueAsRanges() const {
   if (!pImpl)
     return {};
@@ -795,7 +795,7 @@ ConstantRange AttributeImpl::getValueAsConstantRange() const {
       ->getConstantRangeValue();
 }
 
-SmallVector<std::pair<int64_t, int64_t>, 16>
+SmallVector<std::pair<int64_t, int64_t>, 2>
 AttributeImpl::getValueAsRanges() const {
   assert(isConstRangeListAttribute());
   return static_cast<const ConstRangeListAttributeImpl *>(this)
@@ -1986,7 +1986,7 @@ AttrBuilder &AttrBuilder::addTypeAttr(Attribute::AttrKind Kind, Type *Ty) {
 
 AttrBuilder &AttrBuilder::addConstRangeListAttr(
     Attribute::AttrKind Kind,
-    SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+    SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges) {
   return addAttribute(Attribute::get(Ctx, Kind, Ranges));
 }
 

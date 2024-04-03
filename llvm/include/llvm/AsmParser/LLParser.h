@@ -311,7 +311,7 @@ namespace llvm {
     bool parseRange(std::pair<int64_t, int64_t> &Range);
     bool parseInitializedRanges(
         lltok::Kind AttrKind,
-        SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges);
+        SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges);
     bool parseOptionalUWTableKind(UWTableKind &Kind);
     bool parseAllocKind(AllocFnKind &Kind);
     std::optional<MemoryEffects> parseMemoryAttr();

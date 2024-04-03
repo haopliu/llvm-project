@@ -769,12 +769,12 @@ bool postDominatesEntry(Instruction *I, FunctionAnalysisManager &FAM) {
 
 /// Get the memory intervals that `W` writes to. If `W` is a CallInst, the
 /// intervals can be a list of const ranges.
-SmallVector<std::pair<int64_t, int64_t>, 16>
+SmallVector<std::pair<int64_t, int64_t>, 2>
 getWriteIntervals(Instruction *W, Argument *Arg, const TargetLibraryInfo &TLI,
                   const DataLayout &DL) {
   auto FinalizeIntervalFunc =
       [&W](std::optional<MemoryLocation> MemLoc,
-           int WriteOff = 0) -> SmallVector<std::pair<int64_t, int64_t>, 16> {
+           int WriteOff = 0) -> SmallVector<std::pair<int64_t, int64_t>, 2> {
     if (!MemLoc.has_value())
       return {};
     if (MemLoc->Size.isPrecise() && !MemLoc->Size.isScalable()) {
@@ -814,7 +814,7 @@ getWriteIntervals(Instruction *W, Argument *Arg, const TargetLibraryInfo &TLI,
 
 /// Get the memory intervals that `Writes` write to, then merge intervals and
 /// return in ascending order.
-SmallVector<std::pair<int64_t, int64_t>, 16>
+SmallVector<std::pair<int64_t, int64_t>, 2>
 getWriteIntervals(const SmallVectorImpl<Instruction *> &Writes, Argument *Arg,
                   const TargetLibraryInfo &TLI, const DataLayout &DL) {
   // Write intervals: end --> start.
@@ -840,7 +840,7 @@ getWriteIntervals(const SmallVectorImpl<Instruction *> &Writes, Argument *Arg,
     }
   }
 
-  SmallVector<std::pair<int64_t, int64_t>, 16> IntervalsInOrder;
+  SmallVector<std::pair<int64_t, int64_t>, 2> IntervalsInOrder;
   for (auto &[End, Start] : IntervalMapping) {
     IntervalsInOrder.push_back(std::make_pair(Start, End));
   }
@@ -849,7 +849,7 @@ getWriteIntervals(const SmallVectorImpl<Instruction *> &Writes, Argument *Arg,
 
 /// Get initialization intervals. Initializations are writes that dominates
 /// reads and post-dominates entry.
-SmallVector<std::pair<int64_t, int64_t>, 16>
+SmallVector<std::pair<int64_t, int64_t>, 2>
 getInitIntervals(const SmallVectorImpl<Instruction *> &Writes,
                  const SmallVectorImpl<Instruction *> &Reads, Argument *Arg,
 		 FunctionAnalysisManager &FAM) {
@@ -1029,7 +1029,7 @@ determinePointerAccessAttrs(Argument *A,
 }
 
 /// Compute the argument initialized attribute.
-static SmallVector<std::pair<int64_t, int64_t>, 16>
+static SmallVector<std::pair<int64_t, int64_t>, 2>
 determinePointerInitAttrs(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
 			  FunctionAnalysisManager &FAM, bool SkipInitializedAttr) {
   if (SkipInitializedAttr)
@@ -1166,7 +1166,7 @@ static bool addAccessAttr(Argument *A, Attribute::AttrKind R) {
 }
 
 static bool addInitAttr(Argument *A,
-                        SmallVector<std::pair<int64_t, int64_t>, 16> &Inits) {
+                        SmallVectorImpl<std::pair<int64_t, int64_t>> &Inits) {
   assert(A && "Argument must not be null.");
   assert(!Inits.empty() && "Inits must not be empty.");
 
@@ -1360,9 +1360,9 @@ static void addArgumentAttrs(const SCCNodeSet &SCCNodes,
     };
 
     auto meetInitAttr =
-        [](SmallVector<std::pair<int64_t, int64_t>, 16> &InitsA,
-           SmallVector<std::pair<int64_t, int64_t>, 16> &InitsB) {
-          SmallVector<std::pair<int64_t, int64_t>, 16> Intersection;
+        [](SmallVectorImpl<std::pair<int64_t, int64_t>> &InitsA,
+           SmallVectorImpl<std::pair<int64_t, int64_t>> &InitsB) {
+          SmallVector<std::pair<int64_t, int64_t>, 2> Intersection;
           // Intersect two interval lists.
           for (size_t i = 0, j = 0; i < InitsA.size() && j < InitsB.size();) {
             int64_t Start = std::max(InitsA[i].first, InitsB[j].first);

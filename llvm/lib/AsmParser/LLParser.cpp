@@ -1567,7 +1567,7 @@ bool LLParser::parseEnumAttribute(Attribute::AttrKind Attr, AttrBuilder &B,
     return false;
   }
   case Attribute::Initialized: {
-    SmallVector<std::pair<int64_t, int64_t>, 16> Ranges;
+    SmallVector<std::pair<int64_t, int64_t>, 2> Ranges;
     if (parseInitializedRanges(lltok::kw_initialized, Ranges))
       return true;
     B.addConstRangeListAttr(Attribute::Initialized, Ranges);
@@ -2404,7 +2404,7 @@ bool LLParser::parseRange(std::pair<int64_t, int64_t> &Range) {
 
 bool LLParser::parseInitializedRanges(
     lltok::Kind AttrKind,
-    SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+    SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges) {
   assert(AttrKind == lltok::kw_initialized);
   Ranges.clear();
 

@@ -83,7 +83,7 @@ public:
 
   ConstantRange getValueAsConstantRange() const;
 
-  SmallVector<std::pair<int64_t, int64_t>, 16> getValueAsRanges() const;
+  SmallVector<std::pair<int64_t, int64_t>, 2> getValueAsRanges() const;
 
   /// Used when sorting the attributes.
   bool operator<(const AttributeImpl &AI) const;
@@ -135,7 +135,7 @@ public:
 
   static void
   Profile(FoldingSetNodeID &ID, Attribute::AttrKind Kind,
-          const SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+          const SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges) {
     ID.AddInteger(Kind);
     ID.AddRanges(Ranges);
   }
@@ -238,15 +238,15 @@ public:
 };
 
 class ConstRangeListAttributeImpl : public EnumAttributeImpl {
-  SmallVector<std::pair<int64_t, int64_t>, 16> Ranges;
+  SmallVector<std::pair<int64_t, int64_t>, 2> Ranges;
 
 public:
   ConstRangeListAttributeImpl(
       Attribute::AttrKind Kind,
-      SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges)
-      : EnumAttributeImpl(ConstRangeListAttrEntry, Kind), Ranges(Ranges) {}
+      const SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges)
+      : EnumAttributeImpl(ConstRangeListAttrEntry, Kind), Ranges(Ranges.begin(), Ranges.end()) {}
 
-  SmallVector<std::pair<int64_t, int64_t>, 16> getRangesValue() const {
+  SmallVector<std::pair<int64_t, int64_t>, 2> getRangesValue() const {
     return Ranges;
   }
 };

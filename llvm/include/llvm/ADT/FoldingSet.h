@@ -362,7 +362,7 @@ public:
     }
   }
 
-  void AddRanges(const SmallVector<std::pair<int64_t, int64_t>, 16> &Ranges) {
+  void AddRanges(const SmallVectorImpl<std::pair<int64_t, int64_t>> &Ranges) {
     unsigned Size = Ranges.size();
 
     unsigned NumsToInsert = 1 + 2 * Size;
