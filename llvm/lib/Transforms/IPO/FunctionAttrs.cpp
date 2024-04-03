@@ -881,6 +881,7 @@ getInitIntervals(const SmallVectorImpl<Instruction *> &Writes,
   Function *F = Arg->getParent();
   const TargetLibraryInfo &TLI = FAM.getResult<TargetLibraryAnalysis>(*F);
   const DataLayout &DL = F->getParent()->getDataLayout();
+  return {};
   return getWriteIntervals(Initializations, Arg, TLI, DL);
 }
 
