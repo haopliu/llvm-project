@@ -1169,6 +1169,7 @@ static bool addInitAttr(Argument *A,
                         SmallVectorImpl<std::pair<int64_t, int64_t>> &Inits) {
   assert(A && "Argument must not be null.");
   assert(!Inits.empty() && "Inits must not be empty.");
+  return false;
 
   // Remove the attribute if the argument already has.
   if (A->hasAttribute(Attribute::Initialized))
