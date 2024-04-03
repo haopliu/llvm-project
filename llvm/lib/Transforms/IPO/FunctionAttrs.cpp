@@ -640,13 +640,13 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
 
     case Instruction::Call:
     case Instruction::Invoke: {
-      CallBase &CB = cast<CallBase>(*I);
+      /*CallBase &CB = cast<CallBase>(*I);
       if (CB.isCallee(U)) {
         Reads->push_back(I);
         // Note that indirect calls do not capture, see comment in
         // CaptureTracking for context
         continue;
-      }
+      }*/
 
       // Given we've explictily handled the callee operand above, what's left
       // must be a data operand (e.g. argument or operand bundle)
@@ -698,8 +698,9 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
         Writes->push_back(I);
       } else {
         SpecialUses->push_back(I);
-      }
-      break;*/
+      }*/
+      Reads->push_back(I);
+      break;
     }
 
     case Instruction::Load:
