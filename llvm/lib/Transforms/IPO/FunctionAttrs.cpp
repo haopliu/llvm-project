@@ -1171,8 +1171,24 @@ static bool addInitAttr(Argument *A,
   assert(!Inits.empty() && "Inits must not be empty.");
 
   // Remove the attribute if the argument already has.
-  if (A->hasAttribute(Attribute::Initialized))
+  if (A->hasAttribute(Attribute::Initialized)) {
+    auto ExistingAttrs = A->getAttribute(Attribute::Initialized).getValueAsRanges();
+    bool equal = true;
+    if (ExistingAttrs.size() != Inits.size()) {
+      equal = false;
+    } else {
+      for (int i = 0; i < Inits.size(); i++) {
+        if (ExistingAttrs[i].first != Inits[i].first ||
+           ExistingAttrs[i].second != Inits[i].second) {
+          equal = false;
+          break;
+        }
+      }
+    }
+    if (equal)
+      return false;
     A->removeAttr(Attribute::Initialized);
+  }
 
   A->addAttr(Attribute::get(A->getContext(), Attribute::Initialized, Inits));
   // TODO: add statistic num.
