@@ -640,17 +640,17 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
 
     case Instruction::Call:
     case Instruction::Invoke: {
-      /*CallBase &CB = cast<CallBase>(*I);
+      CallBase &CB = cast<CallBase>(*I);
       if (CB.isCallee(U)) {
         Reads->push_back(I);
         // Note that indirect calls do not capture, see comment in
         // CaptureTracking for context
         continue;
-      }*/
+      }
 
       // Given we've explictily handled the callee operand above, what's left
       // must be a data operand (e.g. argument or operand bundle)
-      /*const unsigned UseIndex = CB.getDataOperandNo(U);
+      const unsigned UseIndex = CB.getDataOperandNo(U);
 
       // Some intrinsics (for instance ptrmask) do not capture their results,
       // but return results thas alias their pointer argument, and thus should
@@ -673,9 +673,9 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
           for (Use &UU : I->uses())
             if (Visited.insert(&UU).second)
               Worklist.push_back(&UU);
-      }*/
+      }
 
-      /*ModRefInfo ArgMR = CB.getMemoryEffects().getModRef(IRMemLocation::ArgMem);
+      ModRefInfo ArgMR = CB.getMemoryEffects().getModRef(IRMemLocation::ArgMem);
       if (isNoModRef(ArgMR))
         continue;
 
@@ -698,8 +698,7 @@ void getArgumentUses(Argument *A, const SmallPtrSet<Argument *, 8> &SCCNodes,
         Writes->push_back(I);
       } else {
         SpecialUses->push_back(I);
-      }*/
-      Reads->push_back(I);
+      }
       break;
     }
 
