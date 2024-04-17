@@ -71,6 +71,10 @@ public:
   /// with another range list.
   ConstantRangeList unionWith(const ConstantRangeList &CRL) const;
 
+  /// Return the range list that results from the intersection of this range
+  /// with another range list.
+  ConstantRangeList intersectWith(const ConstantRangeList &CRL) const;
+
   /// Return true if this range list is equal to another range list.
   bool operator==(const ConstantRangeList &CRL) const {
     return Ranges == CRL.Ranges;

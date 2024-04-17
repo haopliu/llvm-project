@@ -106,6 +106,43 @@ ConstantRangeList::unionWith(const ConstantRangeList &CRL) const {
   return Result;
 }
 
+ConstantRangeList
+ConstantRangeList::intersectWith(const ConstantRangeList &CRL) const {
+  assert(getBitWidth() == CRL.getBitWidth() &&
+         "ConstantRangeList types don't agree!");
+
+  // Handle common cases.
+  if (empty())
+    return *this;
+  if (empty())
+    return CRL;
+
+  // Intersect two range lists.
+  ConstantRangeList Result;
+  size_t i = 0, j = 0;
+  while (i < size() && j < CRL.size()) {
+    auto &Range = this->Ranges[i];
+    auto &OtherRange = CRL.Ranges[j];
+    assert(!Range.isSignWrappedSet() && !OtherRange.isSignWrappedSet() &&
+           "Upper wrapped ranges are not supported");
+
+    APInt Start = Range.getLower().slt(OtherRange.getLower())
+                      ? OtherRange.getLower()
+                      : Range.getLower();
+    APInt End = Range.getUpper().slt(OtherRange.getUpper())
+                    ? Range.getUpper()
+                    : OtherRange.getUpper();
+    if (Start.slt(End))
+      Result.append(ConstantRange(Start, End));
+
+    if (Range.getUpper().slt(OtherRange.getUpper()))
+      i++;
+    else
+      j++;
+  }
+  return Result;
+}
+
 void ConstantRangeList::print(raw_ostream &OS) const {
   for (const auto &Range : Ranges)
     Range.print(OS);
