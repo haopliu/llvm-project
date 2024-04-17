@@ -64,6 +64,48 @@ void ConstantRangeList::insert(const ConstantRange &NewRange) {
   return;
 }
 
+ConstantRangeList
+ConstantRangeList::unionWith(const ConstantRangeList &CRL) const {
+  assert(getBitWidth() == CRL.getBitWidth() &&
+         "ConstantRangeList types don't agree!");
+  // Handle common cases.
+  if (empty())
+    return CRL;
+  if (CRL.empty())
+    return *this;
+
+  ConstantRangeList Result;
+  size_t i = 0, j = 0;
+  ConstantRange PreviousRange(getBitWidth(), false);
+  if (Ranges[i].getLower().slt(CRL.Ranges[j].getLower())) {
+    PreviousRange = Ranges[i++];
+  } else {
+    PreviousRange = CRL.Ranges[j++];
+  }
+  auto UnionAndUpdateRange = [&PreviousRange,
+                              &Result](const ConstantRange &CR) {
+    assert(!CR.isSignWrappedSet() && "Upper wrapped ranges are not supported");
+    if (PreviousRange.getUpper().slt(CR.getLower())) {
+      Result.append(PreviousRange);
+      PreviousRange = CR;
+    } else {
+      PreviousRange = ConstantRange(PreviousRange.getLower(), CR.getUpper());
+    }
+  };
+  while (i < size() || j < CRL.size()) {
+    if (j == CRL.size() ||
+        (i < size() && Ranges[i].getLower().slt(CRL.Ranges[j].getLower()))) {
+      // Merge PreviousRange with this.
+      UnionAndUpdateRange(Ranges[i++]);
+    } else {
+      // Merge PreviousRange with CRL.
+      UnionAndUpdateRange(CRL.Ranges[j++]);
+    }
+  }
+  Result.append(PreviousRange);
+  return Result;
+}
+
 void ConstantRangeList::print(raw_ostream &OS) const {
   for (const auto &Range : Ranges)
     Range.print(OS);
