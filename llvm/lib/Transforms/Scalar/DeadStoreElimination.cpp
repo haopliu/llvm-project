@@ -52,6 +52,7 @@
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
+#include "llvm/IR/ConstantRangeList.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
@@ -808,7 +809,8 @@ bool canSkipDef(MemoryDef *D, bool DefVisibleToCaller) {
 struct DSEState;
 class MemLocInfo {
 public:
-  MemLocInfo(MemoryLocation MemLoc) : MemLoc(MemLoc) {
+  MemLocInfo(MemoryLocation MemLoc, bool IsInitAttrMemLoc)
+      : MemLoc(MemLoc), IsInitAttrMemLoc(IsInitAttrMemLoc) {
     assert(MemLoc.Ptr && "MemLoc should be not null");
     UnderlyingObject = getUnderlyingObject(MemLoc.Ptr);
   }
@@ -823,11 +825,12 @@ public:
 
   MemoryLocation MemLoc;
   const Value *UnderlyingObject;
+  bool IsInitAttrMemLoc = false;
 };
 
 class MemDefInfo {
 public:
-  MemDefInfo(MemoryDef *MemDef, DSEState &State);
+  MemDefInfo(MemoryDef *MemDef, DSEState &State, bool consider_init_attr);
   bool IsMemTerminatorInst() const;
   MemoryAccess *GetDefiningAccess() const {
     return MemDef->getDefiningAccess();
@@ -836,8 +839,135 @@ public:
   MemoryDef *MemDef;
   Instruction *DefInst;
   DSEState &State;
-  std::optional<MemLocInfo> MemoryLocation;
+  bool IsInitAttrMemDef = false;
+  SmallVector<MemLocInfo, 2> MemoryLocations;
 };
+
+// Return true if I is a CallInst and the callee has "initializes" attribute.
+bool HasInitializesAttr(Instruction *I) {
+  CallBase *CB = dyn_cast<CallBase>(I);
+  if (!CB)
+    return false;
+
+  const Function *Callee = CB->getCalledFunction();
+  if (!Callee)
+    return false;
+
+  const AttributeList &Attrs = Callee->getAttributes();
+  for (size_t Idx = 0; Idx < Callee->arg_size(); Idx++) {
+    if (Attrs.hasParamAttr(Idx, Attribute::Initializes)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+struct ArgumentInitInfo {
+  size_t Idx = -1;
+  ConstantRangeList Inits;
+  bool IsInvisibleToCallerOnUnwind = false;
+  bool CalleeHasNoUnwindAttr = false;
+};
+
+ConstantRangeList
+GetMergedInitAttr(const SmallVectorImpl<ArgumentInitInfo> &Args) {
+  if (Args.empty())
+    return {};
+
+  // To address unwind, the function should have nounwind attribute or the
+  // arguments are invisible to caller on unwind. Otherwise, return empty.
+  for (const auto &Arg : Args) {
+    if (!Arg.CalleeHasNoUnwindAttr && !Arg.IsInvisibleToCallerOnUnwind)
+      return {};
+    if (Arg.Inits.empty())
+      return {};
+  }
+
+  if (Args.size() == 1)
+    return Args[0].Inits;
+
+  ConstantRangeList MergedIntervals = Args[0].Inits;
+  for (size_t i = 1; i < Args.size(); i++) {
+    MergedIntervals = MergedIntervals.intersectWith(Args[i].Inits);
+  }
+  return MergedIntervals;
+}
+
+// Return the initializes arguments: <Argument index, Init start, Init end>.
+// Note that this function considers:
+// 1. Unwind edge: apply "initializes" attribute only if the callee has
+//    "nounwind" attribute or the argument has "dead_on_unwind" attribute.
+// 2. Argument alias: for aliasing arguments, the "initializes" attribute is
+//    the merged const range list of their own "initializes" attribute.
+SmallVector<std::tuple<size_t, int64_t, int64_t>, 2>
+GetInitializesArguments(const CallBase *CB, BatchAAResults &BatchAA,
+                        DenseMap<const Value *, bool> &InvisibleOnUnwind) {
+  const Function *Callee = CB->getCalledFunction();
+  if (!Callee)
+    return {};
+  bool HasNoUnwindAttr = Callee->hasFnAttribute(Attribute::NoUnwind);
+  const AttributeList &Attrs = Callee->getAttributes();
+
+  SmallMapVector<Value *, SmallVector<ArgumentInitInfo, 2>, 2> Arguments;
+  auto InsertToAliasingList =
+      [&Arguments, &BatchAA](Value *CurArg, ArgumentInitInfo ArgInitInfo) {
+        for (auto &[Arg, AliasList] : Arguments) {
+          if (BatchAA.isMustAlias(Arg, CurArg)) {
+            AliasList.push_back(ArgInitInfo);
+            return;
+          }
+        }
+        Arguments[CurArg] = {ArgInitInfo};
+      };
+
+  for (size_t Idx = 0; Idx < CB->arg_size(); Idx++) {
+    Value *CurArg = CB->getArgOperand(Idx);
+
+    ConstantRangeList Inits;
+    if (Attrs.hasParamAttr(Idx, Attribute::Initializes))
+      Inits = Attrs.getParamAttr(Idx, Attribute::Initializes)
+                  .getValueAsConstantRangeList();
+
+    ArgumentInitInfo InitInfo{Idx, Inits, InvisibleOnUnwind[CurArg],
+                              HasNoUnwindAttr};
+    InsertToAliasingList(CurArg, InitInfo);
+  }
+
+  SmallVector<std::tuple<size_t, int64_t, int64_t>, 2> Result;
+  for (const auto &[_, Args] : Arguments) {
+    auto MergedInitAttr = GetMergedInitAttr(Args);
+    if (MergedInitAttr.empty())
+      continue;
+
+    for (const auto &Arg : Args) {
+      for (const auto &Range : MergedInitAttr) {
+        Result.push_back({Arg.Idx, Range.getLower().getSExtValue(),
+                          Range.getUpper().getSExtValue()});
+      }
+    }
+  }
+  return Result;
+}
+
+SmallVector<MemoryLocation, 2>
+GetInitializesArgMemLoc(const Instruction *I, BatchAAResults &BatchAA,
+                        DenseMap<const Value *, bool> &InvisibleOnUnwind) {
+  const CallBase *CB = dyn_cast<CallBase>(I);
+  if (!CB)
+    return {};
+
+  SmallVector<MemoryLocation, 2> Locations;
+  for (const auto &[Idx, Start, End] :
+       GetInitializesArguments(CB, BatchAA, InvisibleOnUnwind)) {
+    // TODO: how to generate a MemoryLocation that does not start from 0???
+    if (Start == 0) {
+      Locations.push_back(MemoryLocation(CB->getArgOperand(Idx),
+                                         LocationSize::precise(End - Start),
+                                         CB->getAAMetadata()));
+    }
+  }
+  return Locations;
+}
 
 struct DSEState {
   Function &F;
@@ -916,7 +1046,8 @@ struct DSEState {
 
         auto *MD = dyn_cast_or_null<MemoryDef>(MA);
         if (MD && MemDefs.size() < MemorySSADefsPerBlockLimit &&
-            (getLocForWrite(&I) || isMemTerminatorInst(&I)))
+            (getLocForWrite(&I) || isMemTerminatorInst(&I) ||
+             HasInitializesAttr(&I)))
           MemDefs.push_back(MD);
       }
     }
@@ -1609,7 +1740,19 @@ struct DSEState {
 
       // Uses which may read the original MemoryDef mean we cannot eliminate the
       // original MD. Stop walk.
-      if (isReadClobber(MaybeDeadLoc, UseInst)) {
+      // If KillingDef is a CallInst with "initializes" attribute, the reads in
+      // Callee would be dominated by initializations, so this should be safe.
+      bool IsKillingDefFromInitAttr = false;
+      if (KillingLocInfo.IsInitAttrMemLoc) {
+        if (KillingDefInfo.DefInst == UseInst &&
+            KillingLocInfo.SameUnderlyingObject(MaybeDeadLoc)) {
+          IsKillingDefFromInitAttr = true;
+          // Note that, we don't need to check aliasing arguments here since
+          // aliasing has been considered at the begining.
+        }
+      }
+
+      if (isReadClobber(MaybeDeadLoc, UseInst) && !IsKillingDefFromInitAttr) {
         LLVM_DEBUG(dbgs() << "    ... found read clobber\n");
         return std::nullopt;
       }
@@ -2176,20 +2319,34 @@ enum ChangeStateEnum {
   PartiallyDeleteByNonMemTerm,
 };
 
-MemDefInfo::MemDefInfo(MemoryDef *MemDef, DSEState &State)
+MemDefInfo::MemDefInfo(MemoryDef *MemDef, DSEState &State,
+                       bool consider_init_attr)
     : MemDef(MemDef), State(State) {
   DefInst = MemDef->getMemoryInst();
 
   if (State.isMemTerminatorInst(DefInst)) {
     if (auto KillingLoc = State.getLocForTerminator(DefInst)) {
-      MemoryLocation = MemLocInfo(KillingLoc->first);
+      MemoryLocations.push_back(MemLocInfo(KillingLoc->first, false));
     }
     return;
   }
 
   auto MemLocOpt = State.getLocForWrite(DefInst);
   if (MemLocOpt.has_value()) {
-    MemoryLocation = MemLocInfo(*MemLocOpt);
+    MemoryLocations.push_back(MemLocInfo(*MemLocOpt, false));
+  }
+  if (consider_init_attr) {
+    DenseMap<const Value *, bool> InvisibleOnUnwind;
+    if (const CallBase *CB = dyn_cast<CallBase>(DefInst))
+      for (size_t Idx = 0; Idx < CB->arg_size(); Idx++) {
+        Value *CurArg = CB->getArgOperand(Idx);
+        InvisibleOnUnwind.insert(
+            {CurArg, State.isInvisibleToCallerOnUnwind(CurArg)});
+      }
+    for (auto &MemLoc :
+         GetInitializesArgMemLoc(DefInst, State.BatchAA, InvisibleOnUnwind)) {
+      MemoryLocations.push_back(MemLocInfo(MemLoc, true));
+    }
   }
 }
 
@@ -2241,8 +2398,10 @@ ChangeStateEnum checkMemDef(MemDefInfo &KillingDefInfo,
       continue;
     }
 
-    MemDefInfo DeadDefInfo(cast<MemoryDef>(DeadAccess), State);
-    MemLocInfo &DeadLocInfo = DeadDefInfo.MemoryLocation.value();
+    MemDefInfo DeadDefInfo(cast<MemoryDef>(DeadAccess), State,
+                           /*consider_init_attr=*/false);
+    assert(DeadDefInfo.MemoryLocations.size() == 1);
+    MemLocInfo &DeadLocInfo = DeadDefInfo.MemoryLocations[0];
     LLVM_DEBUG(dbgs() << " (" << *DeadDefInfo.DefInst << ")\n");
     ToCheck.insert(DeadDefInfo.GetDefiningAccess());
     NumGetDomMemoryDefPassed++;
@@ -2329,8 +2488,9 @@ static bool eliminateDeadStores(Function &F, AliasAnalysis &AA, MemorySSA &MSSA,
     if (State.SkipStores.count(KillingDef))
       continue;
 
-    MemDefInfo KillingDefInfo(KillingDef, State);
-    if (!KillingDefInfo.MemoryLocation.has_value()) {
+    MemDefInfo KillingDefInfo(KillingDef, State,
+                              /*consider_init_attr=*/true);
+    if (KillingDefInfo.MemoryLocations.empty()) {
       LLVM_DEBUG(dbgs() << "Failed to find analyzable write location for "
                         << *KillingDefInfo.DefInst << "\n");
       continue;
@@ -2339,30 +2499,39 @@ static bool eliminateDeadStores(Function &F, AliasAnalysis &AA, MemorySSA &MSSA,
                       << *KillingDef << " (" << *KillingDefInfo.DefInst
                       << ")\n");
 
-    auto &KillingLocInfo = KillingDefInfo.MemoryLocation.value();
-    ChangeStateEnum ChangeState =
-        checkMemDef(KillingDefInfo, KillingLocInfo, State);
-    MadeChange |= (ChangeState != NoChange);
-    bool Shortend = ChangeState == PartiallyDeleteByNonMemTerm;
+    // Check each MemLocInfo in KillingDefInfo.
+    for (MemLocInfo &KillingLocInfo : KillingDefInfo.MemoryLocations) {
+      ChangeStateEnum ChangeState =
+          checkMemDef(KillingDefInfo, KillingLocInfo, State);
+      MadeChange |= (ChangeState != NoChange);
+      bool Shortend = ChangeState == PartiallyDeleteByNonMemTerm;
 
-    // Check if the store is a no-op.
-    if (!Shortend && State.storeIsNoop(KillingDefInfo.MemDef,
-                                       KillingLocInfo.UnderlyingObject)) {
-      LLVM_DEBUG(dbgs() << "DSE: Remove No-Op Store:\n  DEAD: "
-                        << *KillingDefInfo.DefInst << '\n');
-      State.deleteDeadInstruction(KillingDefInfo.DefInst);
-      NumRedundantStores++;
-      MadeChange = true;
-      continue;
-    }
-    // Can we form a calloc from a memset/malloc pair?
-    if (!Shortend && State.tryFoldIntoCalloc(KillingDefInfo.MemDef,
-                                             KillingLocInfo.UnderlyingObject)) {
-      LLVM_DEBUG(dbgs() << "DSE: Remove memset after forming calloc:\n"
-                        << "  DEAD: " << *KillingDefInfo.DefInst << '\n');
-      State.deleteDeadInstruction(KillingDefInfo.DefInst);
-      MadeChange = true;
-      continue;
+      // If KillingDefInfo is a CallInst with "initializes" attribute, skip the
+      // logic that is going to delete KillingDef as we cannot delete such
+      // CallInsts.
+      if (KillingDefInfo.IsInitAttrMemDef)
+        continue;
+
+      // Check if the store is a no-op.
+      if (!Shortend && State.storeIsNoop(KillingDefInfo.MemDef,
+                                         KillingLocInfo.UnderlyingObject)) {
+        LLVM_DEBUG(dbgs() << "DSE: Remove No-Op Store:\n  DEAD: "
+                          << *KillingDefInfo.DefInst << '\n');
+        State.deleteDeadInstruction(KillingDefInfo.DefInst);
+        NumRedundantStores++;
+        MadeChange = true;
+        continue;
+      }
+      // Can we form a calloc from a memset/malloc pair?
+      if (!Shortend &&
+          State.tryFoldIntoCalloc(KillingDefInfo.MemDef,
+                                  KillingLocInfo.UnderlyingObject)) {
+        LLVM_DEBUG(dbgs() << "DSE: Remove memset after forming calloc:\n"
+                          << "  DEAD: " << *KillingDefInfo.DefInst << '\n');
+        State.deleteDeadInstruction(KillingDefInfo.DefInst);
+        MadeChange = true;
+        continue;
+      }
     }
   }
 
