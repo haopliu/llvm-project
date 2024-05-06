@@ -68,6 +68,22 @@ public:
                          APInt(64, Upper, /*isSigned=*/true)));
   }
 
+  // Append a new Range to Ranges. Caller should make sure
+  // the list is still ordered after appending.
+  void append(const ConstantRange &Range) { Ranges.push_back(Range); }
+  void append(int64_t Lower, int64_t Upper) {
+    append(ConstantRange(APInt(64, Lower, /*isSigned=*/true),
+                         APInt(64, Upper, /*isSigned=*/true)));
+  }
+
+  /// Return the range list that results from the union of this range
+  /// with another range list.
+  ConstantRangeList unionWith(const ConstantRangeList &CRL) const;
+
+  /// Return the range list that results from the intersection of this range
+  /// with another range list.
+  ConstantRangeList intersectWith(const ConstantRangeList &CRL) const;
+
   /// Return true if this range list is equal to another range list.
   bool operator==(const ConstantRangeList &CRL) const {
     return Ranges == CRL.Ranges;
